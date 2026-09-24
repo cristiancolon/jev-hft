@@ -22,6 +22,29 @@ const MAGNITUDE: Record<AssetClass, string[]> = {
   equity: ['Negligible', 'Small: under 0.5%', 'Moderate: 0.5% to 2%', 'Large: over 2%'],
 };
 
+/**
+ * The same rubric as a move in bps, one number per level: nothing, the middle of each bounded
+ * range, and one and a half times the bound for the open-ended top one. This is what turns Jev's
+ * answer into a size that can be weighed against the cost of a trade (src/dashboard/pnl.ts).
+ */
+const MAGNITUDE_BPS: Record<AssetClass, number[]> = {
+  crypto: [0, 10, 60, 150],
+  equity: [0, 25, 125, 300],
+};
+
+/**
+ * The move Jev expects in the direction it leans, in bps: the chance the news matters, times how
+ * much more bullish than bearish it is, times the size its magnitude answer (0 to 3, a weighted
+ * average of the levels) stands for, read between the levels in a straight line.
+ */
+export function expectedMoveBps(assetClass: AssetClass, signal: number, magnitude: number): number {
+  const sizes = MAGNITUDE_BPS[assetClass];
+  const m = Math.min(Math.max(magnitude, 0), sizes.length - 1);
+  const below = Math.min(Math.floor(m), sizes.length - 2);
+  const size = sizes[below]! + (m - below) * (sizes[below + 1]! - sizes[below]!);
+  return Math.abs(signal) * size;
+}
+
 /** "30 minutes", "90 seconds", "1 hour": the measured time span in words. */
 export function spanWords(seconds: number) {
   const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;

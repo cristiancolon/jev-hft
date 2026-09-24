@@ -204,6 +204,21 @@ story 25 seconds later was marked as not new (0.39, against 0.80 for the first).
 questions are understood as intended; it doesn't show the answers make money. Those test outputs
 are kept in `data/test/`, away from real data.
 
+## What the dashboard does with the answers
+
+Each answer about Bitcoin reaches the dashboard the moment Jev gives it, and two of its trading
+rules act on it straight away. The selective rule sits out Jev's second-by-second calls that a
+headline from the last 15 minutes disagrees with, and the news card trades the headline itself
+when the move Jev expects beats the cost of a round trip ([dashboard.md](dashboard.md),
+[decisions.md](decisions.md#d60-the-dashboard-hears-of-a-headline-when-jev-answers-it-not-when-its-record-is-saved)).
+Neither waits for the record this program saves half an hour later.
+
+**How quickly Bitcoin news arrives** varies a lot by source. Over 2026-09-21 to 24, half of the
+items arrived within this long of their stated publication time: Benzinga at once (pushed to us),
+Coinbase's status page and X posts in about 15 to 20 seconds, CoinDesk in 39 seconds, and
+Cointelegraph in about 7 minutes, whose feed evidently lags its own site. Stated publication
+times are often rounded to the minute, so treat these as rough.
+
 ## When a call fails or there's too much news
 
 - **Rate limit reached:** the item goes back in line, in order of arrival, and the engine pauses

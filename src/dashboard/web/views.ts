@@ -239,6 +239,9 @@ export function renderLatency(state: DashboardState) {
 /** Money with the sign in front, so a loss reads as −$1.20 rather than $-1.20. */
 const usdSigned = (x: number) => `${x > 0 ? '+' : x < 0 ? '\u2212' : ''}$${Math.abs(x).toFixed(2)}`;
 
+/** How long a trade is held, in words: seconds for the market-data cards, minutes for the news one. */
+const held = (horizonS: number) => (horizonS >= 60 && horizonS % 60 === 0 ? `${horizonS / 60} min` : `${horizonS} s`);
+
 /** What each card's rule is, in a sentence or two, shown under its numbers. */
 const PNL_RULES: Record<PnlCard, (horizonS: number) => string> = {
   pnl: h =>
@@ -247,6 +250,8 @@ const PNL_RULES: Record<PnlCard, (horizonS: number) => string> = {
     `The same calls, but only when the best level of the order book points the same way: when the two disagreed, Jev was right less than half the time. It also sits out if a headline from the last 15 minutes leans the other way. What is left is staked by how strong the lean is next to Jev's ordinary one, up to twice the normal stake.`,
   opnl: h =>
     `No Jev here: the order-book model (six measurements of the book, fitted on earlier days) says how far it expects the price to move in the next ${h} s${h === 10 ? ', and is only listened to when the last minute was calm and the spread was one tick, where the model was right most often' : ''}. It is scored from the moment Jev's answer arrived, like the other two.`,
+  npnl: h =>
+    `Jev's verdict on each headline about Bitcoin: take the side it leans at the mid price the moment its answer arrived, close ${held(h)} later. Jev is asked what the news will do over the next 30 minutes; 1 and 5 minutes show whether closing early would have kept more of it. A headline counts from the moment it is answered, and its trade is settled as each check comes due.`,
 };
 
 /** How Jev's calls are judged worth their cost. */
@@ -256,9 +261,10 @@ const WORTH: Record<PnlCard, string> = {
   pnl: JEV_WORTH,
   fpnl: JEV_WORTH,
   opnl: 'A call is traded only when the move the model expects is more than the round trip costs.',
+  npnl: 'A headline is traded only when the move Jev expects is more than the round trip costs: the chance the news matters, times how much more bullish than bearish it is, times the size its answer stands for (under 0.2% is taken as 10 bp, 0.2% to 1% as 60, over 1% as 150).',
 };
 
-type PnlCard = 'pnl' | 'fpnl' | 'opnl';
+type PnlCard = 'pnl' | 'fpnl' | 'opnl' | 'npnl';
 
 /** What a round trip is charged, in words. */
 const costWords = (pnl: Pnl) => (pnl.feeBpsPerSide === 0 ? 'no fees, only the spread' : `${f.fixed(pnl.feeBpsPerSide, 1)} bp a fill, twice, and the spread`);
@@ -268,6 +274,9 @@ function whyText(prefix: PnlCard, r: Reach, horizonS: number) {
   const cost = r.meanCostBps === null ? '—' : `${f.fixed(r.meanCostBps, 2)} bp`;
   if (prefix === 'opnl') {
     return `Of ${f.int(r.calls)} calls, ${f.int(r.weighed)} came ${horizonS === 10 ? 'in a calm enough market' : 'with a price to trade'}; the biggest move the model expected among them was ${r.largestBps === null ? '—' : `${f.fixed(r.largestBps, 2)} bp`}, against a round trip of ${cost}.`;
+  }
+  if (prefix === 'npnl') {
+    return `Of ${f.int(r.calls)} headlines Jev leaned on whose ${held(horizonS)} are up, the biggest move it expected was ${r.largestBps === null ? '—' : `${f.fixed(r.largestBps, 1)} bp`}, against a round trip of ${cost} on average.`;
   }
   if (r.weighed === 0) return `None of its ${f.int(r.calls)} calls had enough finished calls like them to judge by yet.`;
   return `Of ${f.int(r.calls)} calls, ${f.int(r.weighed)} had enough finished calls like them to judge by; the most any of them could be counted on to catch was ${f.bp(r.largestBps, 2)}, against a round trip of ${cost}.`;
@@ -281,8 +290,10 @@ function anywayText(prefix: PnlCard, r: Reach) {
 }
 
 /** Why no trade is what to expect. */
-const noTradeText = (pnl: Pnl) =>
-  pnl.feeBpsPerSide > 0
+const noTradeText = (prefix: PnlCard, pnl: Pnl) =>
+  prefix === 'npnl'
+    ? 'Most headlines are about something Jev expects to move the price by less than a round trip costs, so it takes only the few it expects the most of.'
+    : pnl.feeBpsPerSide > 0
     ? 'No trade is the expected result at a taker’s fees: calls like these catch well under a basis point, and a round trip costs several (docs/accuracy.md). Set FEE_BPS_PER_SIDE=0 to see what the rule would do with no fees.'
     : 'Even with no fees, none of its calls was expected to catch more than the spread.';
 
@@ -299,7 +310,11 @@ export function renderPnl(prefix: PnlCard, pnl: Pnl | null, horizonS: number, fa
   const reach = pnl?.reach ?? [];
   const near = reach.find(r => r.horizonS === horizonS);
   const total = id('money');
-  setText(id('sub'), pnl && pnl.n > 0 ? `${f.int(pnl.n)} finished decisions · held ${horizonS} s each` : '');
+  const open = leg?.open ?? 0;
+  setText(
+    id('sub'),
+    pnl && pnl.n > 0 ? `${f.int(pnl.n)} ${prefix === 'npnl' ? 'headlines' : 'finished decisions'} · held ${held(horizonS)} each${open > 0 ? ` · ${f.int(open)} still open` : ''}` : '',
+  );
   // The same rule on the same decisions, without the correction: is reading Jev against its usual lean still paying?
   let faceCalls = '';
   if (prefix === 'pnl') {
@@ -313,7 +328,7 @@ export function renderPnl(prefix: PnlCard, pnl: Pnl | null, horizonS: number, fa
   const why = near && near.calls > 0 ? `${whyText(prefix, near, horizonS)} ${anywayText(prefix, near)}${faceCalls}` : '';
   if (!pnl || !leg || leg.trades === 0) {
     total.className = 'pnl-money';
-    setText(total, why ? 'no trades' : '—');
+    setText(total, open > 0 ? `${f.int(open)} open` : why ? 'no trades' : '—');
     setText(id('bps'), ' ');
     setText(id('stake'), pnl ? `a round trip: ${costWords(pnl)}` : '');
     for (const suffix of ['trades', 'win', 'flat', 'avg', 'best', 'worst', 'dd', 'gross', 'cost']) setText(id(suffix), '—');
@@ -321,8 +336,10 @@ export function renderPnl(prefix: PnlCard, pnl: Pnl | null, horizonS: number, fa
     setHtml(
       id('note'),
       pnl && why
-        ? `${PNL_RULES[prefix](horizonS)} ${WORTH[prefix]}<br>${why}<br>${noTradeText(pnl)}`
-        : prefix === 'pnl'
+        ? `${PNL_RULES[prefix](horizonS)} ${WORTH[prefix]}<br>${why}<br>${noTradeText(prefix, pnl)}`
+        : prefix === 'npnl'
+          ? `${PNL_RULES.npnl(horizonS)} ${WORTH.npnl}<br>Fills in as Jev answers headlines about Bitcoin. Most sources publish a few an hour, and a trade counts once its ${held(horizonS)} are up.`
+          : prefix === 'pnl'
           ? `A call only counts once the price ${horizonS} seconds after the answer is known, so this fills in about a minute behind the decisions themselves. A new run also spends its first minute learning Jev's usual lean, and makes no calls until it has.`
           : prefix === 'fpnl'
             ? `Fills in the same way, once there have been calls that also clear its filters below.`
@@ -357,7 +374,7 @@ export function renderPnl(prefix: PnlCard, pnl: Pnl | null, horizonS: number, fa
   setHtml(
     id('note'),
     `${PNL_RULES[prefix](horizonS)} ${WORTH[prefix]} Trades overlap, so this assumes you could hold several at once.${why ? `<br>${why}` : ''}<br>
-     “Went your way” is a share of the ${f.int(called)} trades where the price actually moved, before any cost: over ${horizonS} s it often does not move at all. ${paid > 0 ? `After costs, ${f.pct(leg.wins / paid)} of trades made money.` : ''}<br>
+     “Went your way” is a share of the ${f.int(called)} trades where the price actually moved, before any cost: over ${held(horizonS)} it often does not move at all. ${paid > 0 ? `After costs, ${f.pct(leg.wins / paid)} of trades made money.` : ''}<br>
      Prices are mid-to-mid, and every trade is charged ${costWords(pnl)} (FEE_BPS_PER_SIDE); “before costs” is what the moves alone were worth.`,
   );
 }

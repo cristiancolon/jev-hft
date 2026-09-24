@@ -425,3 +425,70 @@ test('Jev: left to itself, the report learns from the decisions it is given', ()
   const recs = [...Array.from({ length: 59 }, (_, k) => decision(k, 10, 0.75)), decision(200, 10, 0.75)];
   assert.equal(pnlReport(recs, OPTS, [], MODELS).corrected.legs.find(x => x.horizonS === 10)!.trades, 1);
 });
+
+// ---- news: Jev's verdict on each headline, traded when the move it expects beats the cost -------
+
+/**
+ * A headline about Bitcoin answered `minutes` after T0: Jev leant `signal` (relevance times bullish
+ * minus bearish) with a magnitude answer of `magnitude`, and the price then moved `moveBp` over every
+ * check. At a price of 100, a 1 bp spread is one cent.
+ */
+function headline(minutes: number, signal: number, magnitude: number, moveBp: number, over: Partial<NewsRecord> = {}): NewsRecord {
+  const later = 100 * (1 + moveBp / 1e4);
+  return newsRecord({ tResp: T0 + minutes * 60_000, signal, magnitude, fwdResp: { 60: later, 300: later, 1800: later }, ...over });
+}
+const newsLeg = (news: NewsRecord[], horizonS = 1800, opts = { ...OPTS, feeBpsPerSide: 5 }) => pnlReport([], opts, news, MODELS).news!.legs.find(l => l.horizonS === horizonS)!;
+
+test('news: a headline is traded when the move Jev expects beats the round trip, in the way it leans', () => {
+  // A round trip is two 5 bp fees and a 1 bp spread: 11 bp. Magnitude 2 ("0.2% to 1%") stands for 60 bp.
+  const l = newsLeg([headline(0, 0.5, 2, 30), headline(1, -0.5, 2, -20), headline(2, 0.1, 2, 30)]);
+  assert.equal(l.trades, 2, 'a lean of 0.1 expects 6 bp, which cannot pay for 11');
+  near(l.grossBps, 30 + 20, 'the short caught the fall');
+  near(l.costBps, 2 * 11);
+  near(l.totalBps, 50 - 22);
+});
+
+test('news: the size stands between the rubric levels, and a negligible answer expects nothing', () => {
+  // Magnitude 1.5 is halfway between 10 bp and 60 bp: 35 bp, times a lean of 0.4 is 14 bp.
+  assert.equal(newsLeg([headline(0, 0.4, 1.5, 5)]).trades, 1);
+  assert.equal(newsLeg([headline(0, 0.3, 1.5, 5)]).trades, 0, '10.5 bp is short of 11');
+  assert.equal(newsLeg([headline(0, 1, 0, 5)]).trades, 0, 'certain it is bullish, and certain it will not move');
+});
+
+test('news: each hold is its own trade, and one whose check is not due yet is counted as open', () => {
+  const rec = headline(0, 0.9, 3, 0, { fwdResp: { 60: 100.05, 300: 99.9 } }); // no 30-minute price yet
+  assert.equal(newsLeg([rec], 60).trades, 1);
+  near(newsLeg([rec], 60).grossBps, 5);
+  near(newsLeg([rec], 300).grossBps, -10);
+  const long = newsLeg([rec], 1800);
+  assert.equal(long.trades, 0);
+  assert.equal(long.open, 1);
+});
+
+test('news: a headline with no lean, or about another instrument, is not traded', () => {
+  assert.equal(newsLeg([headline(0, 0, 3, 50)]).trades, 0);
+  assert.equal(newsLeg([headline(0, 0.9, 3, 50, { symbol: 'AAPL' })]).trades, 0);
+  assert.equal(pnlReport([], OPTS, [headline(0, 0.9, 3, 50, { symbol: 'AAPL' })], MODELS).news!.n, 0, 'nor counted');
+});
+
+test('news: an unknown spread costs only the fees', () => {
+  near(newsLeg([headline(0, 0.9, 3, 50, { spreadBps: NaN })]).costBps, 10);
+});
+
+test('news: needs no decisions of its own, and counts headlines however old', () => {
+  const set = pnlReport([], { ...OPTS, feeBpsPerSide: 5 }, [headline(-3 * 24 * 60, 0.9, 3, 50), headline(0, 0.9, 3, 50)], MODELS);
+  assert.equal(set.news!.n, 2);
+  assert.equal(set.news!.since, T0 - 3 * 24 * 3600_000);
+  assert.equal(set.news!.legs.find(l => l.horizonS === 1800)!.trades, 2);
+});
+
+test('news: says how close it came, and what every headline would have made whatever it cost', () => {
+  const news = [headline(0, 0.1, 2, 8), headline(1, -0.15, 2, 3), headline(2, 0, 3, 50)];
+  const set = pnlReport([], { ...OPTS, feeBpsPerSide: 5 }, news, MODELS);
+  const r = set.news!.reach.find(x => x.horizonS === 1800)!;
+  assert.equal(set.news!.legs.find(l => l.horizonS === 1800)!.trades, 0);
+  assert.deepEqual([r.calls, r.right, r.wrong, r.weighed], [2, 1, 1, 2], 'the one with no lean made no call');
+  near(r.largestBps!, 9, 'a lean of 0.15 at 60 bp, whichever way');
+  near(r.meanCostBps!, 11);
+  near(r.grossBps, 8 - 3);
+});

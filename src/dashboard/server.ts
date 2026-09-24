@@ -24,7 +24,8 @@ import type { TelemetryEvent } from '../telemetry/events.ts';
 import { DashboardState, type DashboardEvent, type ServerEvent } from './collector.ts';
 import type { NewsItem } from '../news/types.ts';
 import { liveOutcome, newsOutcome, restoredEntry, scoreboard } from './outcomes.ts';
-import { pnlReport } from './pnl.ts';
+import { HeadlineBook } from './headlines.ts';
+import { NEWS_HORIZONS, pnlReport } from './pnl.ts';
 import { TRACK_WINDOW_MS, TrackRecord } from './track.ts';
 
 const HOST = process.env.DASHBOARD_HOST || '127.0.0.1';
@@ -85,6 +86,8 @@ udp.on('message', datagram => {
       if (e?.v !== 1 || typeof e.type !== 'string' || !PROGRAMS.has(e.program)) throw new Error('not a telemetry message');
       received++;
       publish(e);
+      // The trading rules hear of a headline the moment Jev has answered it, not half an hour later when its record is saved.
+      if (e.type === 'news-answer' && headlines.answered(e)) scoreDirty = true;
     } catch {
       rejected++; // anything can arrive on a UDP port; ignore what we do not understand
     }
@@ -111,12 +114,13 @@ let leans = new LeanBook();
 /** Jev's finished calls over the last few hours, which the profit and loss judges each new call by. */
 let track = new TrackRecord();
 /**
- * Finished news about the traded instrument, oldest first, for the selective profit-and-loss
- * strategy's "did a recent headline agree" check. A headline stays useful long after the pipeline
- * that reported it restarts, so this is never cleared the way `scored` is.
+ * Headlines about the traded instrument, oldest first, from the moment Jev answers each: for the
+ * selective rule's "did a recent headline agree" check and for trading the news itself. Headlines
+ * are rare and stay worth counting long after the program that reported them restarts, so this is
+ * never cleared the way `scored` is, and starts from what earlier runs saved.
  */
-let newsForPnl: NewsRecord[] = [];
-const NEWS_FOR_PNL_LIMIT = 500;
+const HEADLINES_KEPT = 500;
+const headlines = new HeadlineBook(config.product, HEADLINES_KEPT);
 
 /**
  * The file of the most recently STARTED run (its start time is in its name). Not the most
@@ -182,6 +186,24 @@ function restoreNews() {
   }
 }
 
+/** Headlines earlier runs of the news program saved, so trading the news does not start again from nothing on every restart. */
+function restoreHeadlines() {
+  try {
+    if (!existsSync(DECISIONS_DIR)) return;
+    const startedAt = (f: string) => /\d{4}-\d{2}-\d{2}T[\d-]+Z/.exec(f)?.[0] ?? '';
+    const files = readdirSync(DECISIONS_DIR)
+      .filter(f => f.startsWith('news-') && f.endsWith('.jsonl'))
+      .sort((a, b) => startedAt(a).localeCompare(startedAt(b)));
+    for (const file of files) {
+      for (const rec of parseLines<NewsRecord>(tailLines(join(DECISIONS_DIR, file)))) headlines.saved(rec);
+    }
+    const n = headlines.list().length;
+    if (n > 0) log(`restored ${n} headlines about ${config.product} from ${files.length} news file(s)`);
+  } catch (error) {
+    log(`restoring saved headlines: ${(error as Error).message}`);
+  }
+}
+
 /** Complete lines added to the newest file since the last look. */
 function readNew(tail: Tail): string[] {
   const file = newest(tail.prefix);
@@ -237,23 +259,20 @@ function followRecords() {
     const byItem = Map.groupBy(finished, r => `${r.item.id}|${r.item.recvTs}`);
     for (const recs of byItem.values()) publish({ type: 'news-restored', program: 'news', entry: restoredEntry(recs[0]!.item, recs) });
     for (const rec of finished) publish(newsOutcome(rec, MAX_SPREAD_BPS));
-    const aboutTraded = finished.filter(r => r.symbol === config.product);
-    if (aboutTraded.length > 0) {
-      // Sorted so the strategy's "most recent headline" lookup can stop at the first match: two
-      // model calls can finish a moment out of order, even though they were logged close together.
-      newsForPnl = [...newsForPnl, ...aboutTraded].sort((a, b) => a.tResp - b.tResp).slice(-NEWS_FOR_PNL_LIMIT);
-      scoreDirty = true; // a new headline can change what the selective rule would have done
-    }
+    // A saved record brings a headline's exact prices; until then they come from the news program's own ticks.
+    for (const rec of finished) if (headlines.saved(rec)) scoreDirty = true;
+    if (headlines.settle(state.news.ticks, NEWS_HORIZONS)) scoreDirty = true;
     if (scoreDirty) {
       scoreDirty = false;
       publish({ type: 'scoreboard', program: 'live', board: scoreboard(scored) });
-      publish({ type: 'pnl', program: 'live', pnl: pnlReport(scored, { feeBpsPerSide: config.feeBpsPerSide, notionalUsd: NOTIONAL_USD, product: config.product }, newsForPnl, orderBookModels, track) });
+      publish({ type: 'pnl', program: 'live', pnl: pnlReport(scored, { feeBpsPerSide: config.feeBpsPerSide, notionalUsd: NOTIONAL_USD, product: config.product }, headlines.list(), orderBookModels, track) });
     }
   } catch (error) {
     log(`reading finished records: ${(error as Error).message}`);
   }
 }
 restoreNews(); // before following records, so their outcomes find the headlines they belong to
+restoreHeadlines();
 followRecords();
 setInterval(followRecords, 2000);
 

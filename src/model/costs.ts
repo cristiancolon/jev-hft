@@ -17,5 +17,10 @@ export function spreadBps(rec: Pick<DecisionRecord, 'quote' | 'quoteResp'>): num
 
 /** The whole cost of opening and closing one trade, in bps: two fees and the spread. */
 export function roundTripBps(rec: Pick<DecisionRecord, 'quote' | 'quoteResp'>, feeBpsPerSide: number): number {
-  return 2 * feeBpsPerSide + spreadBps(rec);
+  return roundTripAt(spreadBps(rec), feeBpsPerSide);
+}
+
+/** The same, for a trade whose spread is already known in bps (a news record carries its own). An unknown spread counts as none. */
+export function roundTripAt(spread: number, feeBpsPerSide: number): number {
+  return 2 * feeBpsPerSide + (Number.isFinite(spread) && spread > 0 ? spread : 0);
 }

@@ -17,10 +17,16 @@
 // "orderBook" trades the order-book model (src/model/ridge.ts) instead of Jev, and at 10 s only
 // in the calm markets where the model was right most often (docs/accuracy.md).
 //
+// "news" trades the headlines instead: when Jev answers one about the traded instrument, take the
+// side it leans at the price when the answer arrived, and close 1, 5 or 30 minutes later
+// (docs/decisions.md D61). Headlines count from the moment they are answered, not from when the
+// news program saves them half an hour later (src/dashboard/headlines.ts).
+//
 // Every rule weighs the cost before it trades: a call is taken only when it is expected to catch
 // more than the round trip costs, the exchange's fee on the way in and on the way out plus the
-// spread (src/model/costs.ts). The order-book model says how far it expects the price to move.
-// Jev doesn't, so its calls are judged by their track record: what earlier calls of about the
+// spread (src/model/costs.ts). The order-book model says how far it expects the price to move,
+// and so does Jev about a headline. About the market second by second it doesn't, so those calls
+// are judged by their track record: what earlier calls of about the
 // same strength caught, less a margin for luck (src/dashboard/track.ts, docs/decisions.md D59).
 // At a taker's fees that is almost never, which is the finding, not a fault. What every call
 // would have made, traded whatever it cost, is kept beside each rule, so a signal that is right
@@ -32,11 +38,12 @@
 
 import type { DecisionRecord } from '../engine.ts';
 import { bps, num } from '../lib/stats.ts';
-import { roundTripBps } from '../model/costs.ts';
+import { roundTripAt, roundTripBps } from '../model/costs.ts';
 import { DIRECTIONS } from '../model/jev.ts';
 import { calmEnough, orderBookModels, type RidgeModel } from '../model/ridge.ts';
-import type { NewsRecord } from '../news/engine.ts';
+import { expectedMoveBps } from '../news/questions.ts';
 import type { Pnl, PnlLeg, PnlSet, Reach } from './collector.ts';
+import type { NewsCall } from './headlines.ts';
 import { expectations, jevCall, TrackRecord, type JevRule } from './track.ts';
 
 /** Points kept for drawing the running total: enough for a smooth line, small enough to send often. */
@@ -49,6 +56,12 @@ const NEWS_LOOKBACK_MS = 15 * 60_000;
 const NEWS_AGREEMENT_BOOST = 0.25;
 
 const HORIZONS: number[] = Object.values(DIRECTIONS).map(d => d.seconds);
+/**
+ * How long a headline's trade is held. Jev is asked what the news will do over the next 30
+ * minutes (the news program's longest check), so that is the trade it describes; 1 and 5 minutes
+ * show whether closing early would have kept more of it.
+ */
+export const NEWS_HORIZONS = [60, 300, 1800];
 
 export type PnlOptions = {
   /** The exchange's fee on each fill, in bps; a round trip pays it twice, and the spread on top. */
@@ -82,7 +95,7 @@ function direction(signal: unknown): 1 | -1 | null {
  * traded instrument and sorted ascending by `tResp`. Only records with `tResp <= rec.tState` are
  * ever looked at, so a headline is never used before its answer actually existed.
  */
-function jevDecision(rule: JevRule, rec: DecisionRecord, horizonS: number, news: readonly NewsRecord[]): Decision {
+function jevDecision(rule: JevRule, rec: DecisionRecord, horizonS: number, news: readonly NewsCall[]): Decision {
   const call = jevCall(rec, rule, horizonS);
   if (!call) return null;
   if (rule !== 'selective') return { dir: call.dir, sizeFraction: 1 };
@@ -101,7 +114,7 @@ function jevDecision(rule: JevRule, rec: DecisionRecord, horizonS: number, news:
 }
 
 /** One of Jev's rules, expecting of each call what earlier calls like it caught. */
-function jevRule(rule: JevRule, recs: readonly DecisionRecord[], track: TrackRecord, news: readonly NewsRecord[]): Rule {
+function jevRule(rule: JevRule, recs: readonly DecisionRecord[], track: TrackRecord, news: readonly NewsCall[]): Rule {
   const expected = new Map(HORIZONS.map(h => [h, expectations(recs, rule, h, track)]));
   return {
     call: (rec, horizonS) => jevDecision(rule, rec, horizonS, news),
@@ -131,7 +144,23 @@ function thin<T>(xs: T[], most: number): T[] {
   return Array.from({ length: most }, (_, i) => xs[Math.round(i * step)]!);
 }
 
+/** A trade a rule took: when, which way, how much of a normal stake, what the price did, and what the round trip cost, in bps. */
+type Trade = { t: number; dir: 1 | -1; sizeFraction: number; moveBps: number; costBps: number };
+
 function leg(recs: readonly DecisionRecord[], horizonS: number, feeBpsPerSide: number, decide: (rec: DecisionRecord, horizonS: number) => Decision): PnlLeg {
+  const trades: Trade[] = [];
+  for (const rec of recs) {
+    const decision = decide(rec, horizonS);
+    if (!decision) continue;
+    const move = bps(rec.fwdResp[horizonS], rec.midResp);
+    if (!Number.isFinite(move)) continue; // the horizon hasn't finished yet
+    trades.push({ t: rec.tResp, dir: decision.dir, sizeFraction: decision.sizeFraction, moveBps: move, costBps: roundTripBps(rec, feeBpsPerSide) });
+  }
+  return tally(trades, horizonS);
+}
+
+/** Trades in the order they were made, added up. */
+function tally(taken: readonly Trade[], horizonS: number): PnlLeg {
   const curve: { t: number; cumBps: number }[] = [];
   let total = 0;
   let gross = 0;
@@ -146,27 +175,22 @@ function leg(recs: readonly DecisionRecord[], horizonS: number, feeBpsPerSide: n
   let best: number | null = null;
   let worst: number | null = null;
 
-  for (const rec of recs) {
-    const decision = decide(rec, horizonS);
-    if (!decision) continue;
-    const move = bps(rec.fwdResp[horizonS], rec.midResp);
-    if (!Number.isFinite(move)) continue; // the horizon hasn't finished yet
+  for (const { t, dir, sizeFraction, moveBps: move, costBps: cost } of taken) {
     // Unweighted: what the call itself was worth, so "best"/"worst" describe the call, not the stake.
-    const cost = roundTripBps(rec, feeBpsPerSide);
-    const gotBps = decision.dir * move - cost;
-    gross += decision.dir * move * decision.sizeFraction;
-    costs += cost * decision.sizeFraction;
+    const gotBps = dir * move - cost;
+    gross += dir * move * sizeFraction;
+    costs += cost * sizeFraction;
     if (gotBps > 0) wins++;
     else if (gotBps < 0) losses++;
-    if (decision.dir * move > 0) right++;
-    else if (decision.dir * move < 0) wrong++;
+    if (dir * move > 0) right++;
+    else if (dir * move < 0) wrong++;
     best = best === null ? gotBps : Math.max(best, gotBps);
     worst = worst === null ? gotBps : Math.min(worst, gotBps);
-    total += gotBps * decision.sizeFraction;
-    staked += decision.sizeFraction;
+    total += gotBps * sizeFraction;
+    staked += sizeFraction;
     peak = Math.max(peak, total);
     drawdown = Math.max(drawdown, peak - total);
-    curve.push({ t: rec.tResp, cumBps: total });
+    curve.push({ t, cumBps: total });
   }
 
   const trades = curve.length;
@@ -228,11 +252,57 @@ function report(recs: readonly DecisionRecord[], { feeBpsPerSide, notionalUsd }:
 }
 
 /**
- * All four rules over the same finished decisions, in the order they were made. `news` can be
- * every finished news record the dashboard has kept, about any instrument; only ones matching
- * `opts.product` are ever looked at. It can be empty (most sources publish only a few times an
- * hour, so long quiet stretches are normal) and the selective rule simply never gets a
- * fundamental opinion during them. `models` are the order-book models whose calm condition the
+ * Trading the headlines: a call on each one Jev leans on, taken when the move Jev expects beats the
+ * round trip. Jev's answer says how far the price could move (its magnitude rubric,
+ * src/news/questions.ts), so, like the order-book model and unlike Jev's second-by-second calls,
+ * no track record is needed to weigh it against the cost. Each trade is entered at the mid when
+ * the answer arrived and charged the spread then.
+ */
+function newsReport(headlines: readonly NewsCall[], { feeBpsPerSide, notionalUsd }: PnlOptions): Pnl {
+  const calls = headlines.flatMap(h => {
+    const dir = direction(h.signal);
+    return dir ? [{ h, dir, expected: expectedMoveBps(h.assetClass, h.signal, h.magnitude), cost: roundTripAt(h.spreadBps, feeBpsPerSide) }] : [];
+  });
+  const trade = (c: (typeof calls)[number], horizonS: number): Trade | null => {
+    const move = bps(c.h.fwdResp[horizonS], c.h.midResp);
+    return Number.isFinite(move) ? { t: c.h.tResp, dir: c.dir, sizeFraction: 1, moveBps: move, costBps: c.cost } : null;
+  };
+  const taken = calls.filter(c => c.expected > c.cost);
+  return {
+    n: headlines.length,
+    since: headlines.length > 0 ? Math.min(...headlines.map(h => h.tResp)) : null,
+    feeBpsPerSide,
+    notionalUsd,
+    legs: NEWS_HORIZONS.map(horizonS => {
+      const done = taken.flatMap(c => trade(c, horizonS) ?? []);
+      return { ...tally(done, horizonS), open: taken.length - done.length };
+    }),
+    reach: NEWS_HORIZONS.map(horizonS => {
+      const done = calls.filter(c => trade(c, horizonS));
+      const { trades, right, wrong, grossBps, costBps, staked } = tally(done.map(c => trade(c, horizonS)!), horizonS);
+      return {
+        horizonS,
+        calls: trades,
+        right,
+        wrong,
+        grossBps,
+        costBps,
+        staked,
+        weighed: done.length,
+        largestBps: done.length > 0 ? Math.max(...done.map(c => c.expected)) : null,
+        meanCostBps: done.length > 0 ? done.reduce((sum, c) => sum + c.cost, 0) / done.length : null,
+      };
+    }),
+  };
+}
+
+/**
+ * All five rules over the same finished decisions, in the order they were made. `news` can be
+ * every headline the dashboard has kept, about any instrument, answered or saved; only ones
+ * matching `opts.product` are ever looked at. It can be empty (most sources publish only a few
+ * times an hour, so long quiet stretches are normal) and the selective rule simply never gets a
+ * fundamental opinion during them. The news rule trades all of them, however long ago, since
+ * headlines are too rare to fill the decisions' fifty minutes. `models` are the order-book models whose calm condition the
  * orderBook rule follows. `track` holds Jev's finished calls; it can reach back before `recs`,
  * so the first of them are judged by as long a record as the last, and left out it is made from
  * `recs` alone.
@@ -240,7 +310,7 @@ function report(recs: readonly DecisionRecord[], { feeBpsPerSide, notionalUsd }:
 export function pnlReport(
   recs: readonly DecisionRecord[],
   opts: PnlOptions,
-  news: readonly NewsRecord[] = [],
+  news: readonly NewsCall[] = [],
   models: readonly RidgeModel[] = orderBookModels,
   track: TrackRecord = TrackRecord.from(recs),
 ): PnlSet {
@@ -250,5 +320,6 @@ export function pnlReport(
     corrected: report(recs, opts, jevRule('corrected', recs, track, relevant)),
     selective: report(recs, opts, jevRule('selective', recs, track, relevant)),
     orderBook: report(recs, opts, orderBookRule(models)),
+    news: newsReport(relevant, opts),
   };
 }

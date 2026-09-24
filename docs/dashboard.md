@@ -71,7 +71,8 @@ Everything the pipeline is doing, as it does it:
 - **If you had traded selectively:** the same calls under a more careful rule, right next to the
   first so the two can be compared. It trades only when the best level of the order book points
   the same way as Jev, because when the two disagreed Jev was right less than half the time. It
-  sits out if a headline from the last 15 minutes leans the other way. It stakes more on a
+  sits out if a headline from the last 15 minutes leans the other way, counting each headline from
+  the moment Jev answered it (D60). It stakes more on a
   stronger lean: an ordinary lean gets the normal stake, a lean twice as strong as usual gets
   twice that, and nothing gets more. And like the first card, it trades a call only when its own
   track record, the earlier calls the book also agreed with, says the call will pay for itself.
@@ -90,6 +91,18 @@ Everything the pipeline is doing, as it does it:
   so when it has no trades it says how close it came: how many calls came in a calm market, the
   biggest move the model expected, and what a round trip cost. That gap is the finding, not a
   fault. Set `FEE_BPS_PER_SIDE=0` to see what any of the cards would do with no fees.
+- **If you had traded the news:** Jev's verdict on each headline about Bitcoin, traded in the
+  direction it leans at the price when the answer arrived, and closed 1, 5 or 30 minutes later
+  (pick which with the card's own buttons; 30 minutes is what Jev is asked about). Unlike its
+  second-by-second calls, Jev says how big a headline's move could be, so the card weighs that
+  against the round trip the way the order-book card does: the chance the news matters, times how
+  much more bullish than bearish it is, times the size its magnitude answer stands for (under
+  0.2% counts as 10 bp, 0.2% to 1% as 60, over 1% as 150). A trade opens the moment Jev answers
+  and shows as "still open" until its check comes due; its price then comes from the news
+  program's own once-a-second price, and is replaced by the exact one when the headline's record
+  is saved half an hour later. Headlines are rare, so this card counts every one the dashboard
+  has kept (the last 500, restored from the news program's files on a restart), not just the
+  last 50 minutes. See [decisions.md](decisions.md#d61-the-news-is-traded-when-jev-expects-a-move-bigger-than-the-cost).
 
 The scoreboard has a row for the order-book model too, scored from the snapshot like the other
 simple rules, since it takes microseconds.

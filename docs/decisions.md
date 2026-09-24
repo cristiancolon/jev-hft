@@ -788,3 +788,60 @@ at a quarter lost on average. At no fee at all it still trades most 2 and 10 s c
 **When to rethink:** if fees ever fall to where some calls clear the bar, the four-hour window and
 the two-standard-error margin decide how many. Both were chosen on the same 77 hours they are
 described with here, so check them on new days first.
+
+## D60. The dashboard hears of a headline when Jev answers it, not when its record is saved
+
+**Chosen:** the dashboard takes each headline's verdict from the news program's `news-answer`
+message as it arrives (`src/dashboard/headlines.ts`). Its later prices are filled in from the news
+program's once-a-second price as each check comes due, and the saved record replaces it, with its
+exact prices, once the news program writes it. Both the selective rule's news check and the news
+card (D61) read from this.
+
+**Why:** the news program saves a headline's record only after its 30-minute check, and until
+now that was the only way a headline reached the trading rules. So the selective rule's "a
+headline from the last 15 minutes leans the other way" could never apply live: by the time a
+headline was known to the rules it was already 30 minutes old. It was only ever applied in
+hindsight, to decisions near the back of the 50-minute window. News moves prices in its first
+minutes, which is exactly the part that was missed.
+
+**Why the news program's own price:** it is the price the news program itself measures the
+headline's moves by, so the live figure and the saved one agree to within the second between
+ticks. A tick more than two seconds from when a check was due is not used; the check waits for
+the saved record instead.
+
+## D61. The news is traded when Jev expects a move bigger than the cost
+
+**Chosen:** the dashboard's fifth card trades each headline about the traded instrument in the
+direction Jev leans, from the price when the answer arrived, held 1, 5 or 30 minutes, when the
+move Jev expects beats the round trip (two fees and the spread, D55). The expected move is the
+chance the news matters, times how much more bullish than bearish it is, times the size Jev's
+magnitude answer stands for on the rubric it was asked with (`expectedMoveBps` in
+`src/news/questions.ts`: nothing, 10, 60 and 150 bp for Bitcoin's four levels, read in a
+straight line between them).
+
+**Why face value and not a track record, as Jev's other cards use (D59):** Jev's answer about a
+headline says how far the price could move, which its answer about the order book doesn't, so it
+can be weighed against the cost directly, like the order-book model's. And a track record needs
+many calls: the Pi saw about 45 headlines about Bitcoin a day, so a four-hour record would hold
+eight, and the 50 a band needs would take days. Reading the answer at face value lets the card
+act from the first headline and be judged on what follows.
+
+**What to expect:** on the 149 Bitcoin headlines the Pi recorded from 2026-09-20 to 2026-09-24,
+the rule would have taken 36. Over 30 minutes 19 went its way and 17 didn't, +108 bp before
+costs and −256 bp after (−7 bp a trade). Over 1 and 5 minutes it was a coin flip before costs.
+Jev's direction on Bitcoin news has not yet shown any skill: on 62 relevant headlines, the news
+report's rank correlation between its lean and the move is within one standard error of zero at
+every horizon (`npm run analyze:news`). The card is how skill will show, or not, as headlines
+accumulate.
+
+**Why every headline kept and not the last 50 minutes:** the other cards describe the last 50
+minutes of a run because they see thousands of calls in that time. News is too rare for that, so
+the card keeps the last 500 headlines and reads earlier runs' files back on a restart.
+
+**When to rethink:** once a few hundred headlines have been traded, compare what each size of
+expectation actually caught with what it promised. If the promises run high, the sizes in
+`expectedMoveBps` are too generous, and a track record by band (as D59) would be the fairer
+judge. The slowest sources also deserve a look: Cointelegraph's items arrived about seven minutes
+after their stated publication time, and CoinDesk's about forty seconds, by which time much of a
+move may be gone ([news.md](news.md#sources)).
+

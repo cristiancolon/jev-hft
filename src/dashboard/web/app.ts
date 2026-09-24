@@ -17,8 +17,11 @@ const latency = new LatencyChart(view.$<HTMLCanvasElement>('latency-chart'));
 const equity = new EquityChart(view.$<HTMLCanvasElement>('equity-chart'));
 const fequity = new EquityChart(view.$<HTMLCanvasElement>('fequity-chart'));
 const oequity = new EquityChart(view.$<HTMLCanvasElement>('oequity-chart'));
+const nequity = new EquityChart(view.$<HTMLCanvasElement>('nequity-chart'));
 /** The horizon the chart marks and the profit and loss is worked out for. */
 let horizonS = 10;
+/** How long the news card holds each headline's trade: 30 minutes, what Jev is asked about, unless another is picked. */
+let newsHorizonS = 1800;
 view.buildHorizons();
 view.buildGauges();
 
@@ -135,6 +138,9 @@ function frame() {
         equity.setData(state.pnl?.corrected.legs.find(l => l.horizonS === horizonS)?.curve ?? []);
         fequity.setData(state.pnl?.selective.legs.find(l => l.horizonS === horizonS)?.curve ?? []);
         oequity.setData(state.pnl?.orderBook?.legs.find(l => l.horizonS === horizonS)?.curve ?? []);
+        // A dashboard server from before the news rule existed sends no such card either.
+        view.renderPnl('npnl', state.pnl?.news ?? null, newsHorizonS);
+        nequity.setData(state.pnl?.news?.legs.find(l => l.horizonS === newsHorizonS)?.curve ?? []);
       }
     }
     if (news) {
@@ -178,6 +184,10 @@ segmented('seg-horizon', s => {
   horizonS = s;
   chart.horizonS = s;
   chart.invalidate();
+  dirty.add('pnl');
+});
+segmented('seg-news-horizon', s => {
+  newsHorizonS = s;
   dirty.add('pnl');
 });
 

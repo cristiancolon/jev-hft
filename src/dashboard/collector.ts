@@ -71,6 +71,8 @@ export type PnlLeg = {
   maxDrawdownBps: number;
   /** The running total over time, thinned for drawing. */
   curve: { t: number; cumBps: number }[];
+  /** Trades taken whose outcome is not known yet. Only the news rule, whose trades last up to half an hour, says. */
+  open?: number;
 };
 export type Pnl = {
   /** Finished decisions it is based on, and the time of the oldest. */
@@ -87,10 +89,12 @@ export type Pnl = {
  * `asAnswered`: Jev's answers at face value, all the same size. `corrected`: the same, with Jev's
  * usual lean taken out first. `selective`: the corrected lean, but only when the best level of the
  * order book agrees and no very recent headline disagrees, staking more on a stronger lean.
- * `orderBook`: the order-book model's call, at 10 s only in a calm market. Each takes a call only
- * when it is expected to catch more than the round trip costs (docs/dashboard.md).
+ * `orderBook`: the order-book model's call, at 10 s only in a calm market. `news`: Jev's verdict on
+ * each headline about the traded instrument, held 1, 5 or 30 minutes; its `n` counts headlines, not
+ * decisions, and a dashboard server from before it existed sends none. Each takes a call only when
+ * it is expected to catch more than the round trip costs (docs/dashboard.md).
  */
-export type PnlSet = { asAnswered: Pnl; corrected: Pnl; selective: Pnl; orderBook: Pnl };
+export type PnlSet = { asAnswered: Pnl; corrected: Pnl; selective: Pnl; orderBook: Pnl; news?: Pnl };
 /**
  * How near a rule came to trading at one horizon; when it takes no trades, this is why. First,
  * every call it made whose outcome is known, as if each had been traded whatever it cost: how many,

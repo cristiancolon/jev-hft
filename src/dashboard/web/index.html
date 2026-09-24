@@ -195,6 +195,36 @@
             <p class="footnote" id="opnl-note"></p>
           </article>
 
+          <article class="card pnl-card">
+            <header>
+              <h2>If you had traded the news</h2>
+              <div class="seg" id="seg-news-horizon" role="group" aria-label="How long each headline's trade is held">
+                <button data-v="60">1 m</button><button data-v="300">5 m</button><button data-v="1800" class="on">30 m</button>
+              </div>
+            </header>
+            <div class="muted pnl-sub" id="npnl-sub"></div>
+            <div class="pnl-head">
+              <div>
+                <div class="pnl-money" id="npnl-money">—</div>
+                <div class="pnl-bps" id="npnl-bps">&nbsp;</div>
+              </div>
+              <div class="pnl-stake" id="npnl-stake"></div>
+            </div>
+            <div class="spark-wrap tall"><canvas id="nequity-chart"></canvas></div>
+            <dl class="stats compact">
+              <div><dt>trades</dt><dd id="npnl-trades">—</dd></div>
+              <div title="Of the trades where the price moved at all, before any cost"><dt>went your way</dt><dd id="npnl-win">—</dd></div>
+              <div title="Trades where the price was exactly where it started"><dt>no change</dt><dd id="npnl-flat">—</dd></div>
+              <div><dt>average each</dt><dd id="npnl-avg">—</dd></div>
+              <div><dt>best</dt><dd id="npnl-best">—</dd></div>
+              <div><dt>worst</dt><dd id="npnl-worst">—</dd></div>
+              <div title="The largest fall from a high point of the running total"><dt>worst dip</dt><dd id="npnl-dd">—</dd></div>
+              <div title="What the moves alone were worth, with nothing paid for trading"><dt>before costs</dt><dd id="npnl-gross">—</dd></div>
+              <div title="Fees on both fills and the spread, over every trade"><dt>costs</dt><dd id="npnl-cost">—</dd></div>
+            </dl>
+            <p class="footnote" id="npnl-note"></p>
+          </article>
+
           <article class="card live-only" id="decision-card">
             <header>
               <h2>Latest answer</h2>
