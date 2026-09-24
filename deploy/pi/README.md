@@ -50,12 +50,14 @@ pipeline:
 
 ```bash
 ./deploy/pi/setup.sh --service record    # save Coinbase market data around the clock (for backtests)
-./deploy/pi/setup.sh --service live      # the market-data loop (needs gateway credits; about $3 a day)
+./deploy/pi/setup.sh --service record-binanceus  # save Binance.US's BTC/USD and BTC/USDT books and trades too
+./deploy/pi/setup.sh --service live      # the market-data loop (needs TypeSafe credits; about $3 a day)
 ./deploy/pi/setup.sh --service dashboard # the live dashboard, to watch the Pi from another computer
 ```
 
-Each runs as its own service (`jev-hft@record`, `jev-hft@live`, `jev-hft@dashboard`). Saving market data writes about
-260 MB a day, so use an SSD rather than the SD card for that.
+Each runs as its own service (`jev-hft@record`, `jev-hft@record-binanceus`, `jev-hft@live`,
+`jev-hft@dashboard`). Saving Coinbase's data writes about 180 MB a day, so use an SSD rather than the
+SD card for that; Binance.US's is far smaller, since it trades much less.
 
 ## Watching it from your laptop
 

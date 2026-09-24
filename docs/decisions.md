@@ -727,3 +727,25 @@ in the other seconds on the earlier test days, and 58.2% against 55.7% for the d
 the locked one (67% on its strongest tenth). With a spread wider than a tick the book said almost
 nothing. At 60 seconds the same condition made no
 difference, so it isn't applied there.
+
+## D58. Binance.US is recorded next to Coinbase, by a program of its own
+
+**Chosen:** `npm run record:binanceus` (the `jev-hft@record-binanceus` service on the Pi) saves
+Binance.US's BTC/USD and BTC/USDT order books and trades, one file per pair, in the same standard
+form as the Coinbase recording. It is a separate program from `npm run record`, and each pair has
+its own connection.
+
+**Why Binance.US:** it is the one US venue where a small account pays nothing for resting orders
+(0% maker, 0.02% taker since April 2026), and the large exchanges whose prices often move first,
+Binance's and Bybit's main sites, refuse connections from the US outright. Binance.US's market
+makers most likely price off those, so its quotes may carry that information to us. Whether they
+move before Coinbase's, or after, is the question the recording is for.
+
+**Why a program of its own:** the Coinbase recorder has run for days, and one exchange's trouble
+should never stop or restart the other's recording. The same reasoning gives each pair its own
+connection: a book that breaks on one never resets the other.
+
+**What to keep in mind:** Binance.US is small, about $1M of BTC/USD and $3M of BTC/USDT a day in
+September 2026, so a $10,000 order is a noticeable share of a day's trading there. It is useful
+for what its quotes say, much less as a place to trade size.
+

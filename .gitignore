@@ -4,3 +4,6 @@ node_modules
 data/
 .DS_Store
 *.log
+
+# Python caches from importing research/fit.py
+__pycache__/

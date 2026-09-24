@@ -7,6 +7,7 @@
 | `npm run news` | the news path, for Bitcoin and US stocks | `data/decisions/news-...jsonl` and `data/news/items-...jsonl` |
 | `npm run live` | the market-data path, live | `data/decisions/live-...jsonl` |
 | `npm run record` | saves Coinbase market data | `data/raw/BTC-USD-...jsonl.gz` |
+| `npm run record:binanceus` | saves Binance.US's order book and trades, in the same form ([feed.md](feed.md#bitcoin-from-binanceus-binanceusts)) | `data/raw/binanceus-BTCUSD-...jsonl.gz`, one file per pair |
 | `RECORD=1 npm run live` | the market-data path live, saving the data as well | both of the above |
 | `npm run backtest -- <file>` | replays saved data and asks Jev about it | `data/decisions/backtest-...jsonl` |
 | `npm run analyze -- <files>` | report for the market-data path | printed |
@@ -97,6 +98,7 @@ program with a clear message.
 | Setting | Default | Meaning |
 |---|---|---|
 | `PRODUCT` | `BTC-USD` | Coinbase product to watch |
+| `BINANCEUS_SYMBOLS` | `BTCUSD,BTCUSDT` | Binance.US pairs `npm run record:binanceus` saves, one file each |
 | `JEV_ENCODING` | `compact` | `compact` (labeled lines) or `json` |
 | `JEV_MIN_INTERVAL_MS` | `1000` | minimum time between questions. `0` asks back to back, about 2.7 a second, for about three times the cost |
 | `RECORD` | `0` | `1` makes `npm run live` save the market data it sees as well, so that exact run can be replayed later |
@@ -152,8 +154,9 @@ A few tips:
   connections most often die silently; the pipeline notices and reconnects within about 10
   seconds (Coinbase) or 40 seconds (Alpaca), but a cable avoids it.
 - If you'll also save market data around the clock (`--service record`, about 180 MB a day on the
-  Pi in September 2026), use
-  an SSD rather than the SD card, since constant writing wears SD cards out.
+  Pi in September 2026), use an SSD rather than the SD card, since constant writing wears SD cards
+  out. `--service record-binanceus` saves Binance.US's books and trades as well, far less data,
+  as a service of its own.
 - A sudden power cut loses up to 30 minutes of pending news decisions; a normal stop or restart
   doesn't.
 

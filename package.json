@@ -9,6 +9,7 @@
     "bench": "node --env-file-if-exists=.env bench/latency.ts",
     "live": "node --env-file-if-exists=.env src/live.ts",
     "record": "node --env-file-if-exists=.env src/record.ts",
+    "record:binanceus": "node --env-file-if-exists=.env src/record-binanceus.ts",
     "backtest": "node --env-file-if-exists=.env src/backtest.ts",
     "analyze": "node --env-file-if-exists=.env src/analyze.ts",
     "example": "node --env-file-if-exists=.env examples/triage.ts",

@@ -65,6 +65,14 @@ function feeBpsPerSide() {
   return envNum('FEE_BPS', 0, { min: 0 }) / 2;
 }
 
+/** Binance.US pair names, like BTCUSD. Each goes into a web address and a file name, so only letters and digits. */
+function binanceUsSymbols(spec: string | undefined): string[] {
+  const list = (spec || 'BTCUSD,BTCUSDT').split(/[\s,]+/).filter(Boolean).map(s => s.toUpperCase());
+  const bad = list.filter(s => !/^[A-Z0-9]{5,20}$/.test(s));
+  if (bad.length > 0 || list.length === 0) throw new Error(`BINANCEUS_SYMBOLS must be Binance.US pair names like BTCUSD,BTCUSDT, got "${spec}"`);
+  return [...new Set(list)];
+}
+
 const alpacaFeed = process.env.ALPACA_FEED || 'iex';
 
 /** Official accounts followed on X by default: US economic agencies and market regulators, and Coinbase. */
@@ -72,6 +80,12 @@ export const DEFAULT_X_ACCOUNTS = ['federalreserve', 'SECGov', 'CFTC', 'USTreasu
 
 export const config = {
   product: process.env.PRODUCT || 'BTC-USD',
+  /**
+   * Binance.US pairs `npm run record:binanceus` saves, one file each. BTC/USDT trades the most
+   * there and BTC/USD compares directly with Coinbase's BTC-USD; both are small (about $3M and
+   * $1M a day in September 2026).
+   */
+  binanceUsSymbols: binanceUsSymbols(process.env.BINANCEUS_SYMBOLS),
   /** Save the raw market events as well, so a live run can be replayed later (RECORD=1). */
   record: process.env.RECORD === '1',
   /** Which route to Jev: typesafe (direct, the fastest), gateway, or mock (src/model/jev.ts). */

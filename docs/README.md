@@ -144,6 +144,7 @@ src/
   config.ts             every setting, read from environment variables and checked; default news feeds and X accounts
   feed/types.ts         the common format for market data (MarketEvent) and the pipeline's clock
   feed/coinbase.ts      live Bitcoin order book and trades from Coinbase
+  feed/binanceus.ts     the same from Binance.US, rebuilt from a snapshot and its 100 ms changes
   feed/alpaca.ts        shared connection code for Alpaca (sign in, heartbeat, reconnect, resubscribe)
   feed/alpaca-stocks.ts live US stock prices from Alpaca, switched on only for stocks in the news
   feed/recorder.ts      saves market events to a compressed file for later replay
@@ -163,6 +164,7 @@ src/
   engine.ts             the live loop of the market-data path and its record format
   live.ts               runs the market-data path live
   record.ts             saves the Coinbase feed to disk (live.ts can do this too, with RECORD=1)
+  record-binanceus.ts   saves Binance.US's BTC/USD and BTC/USDT feeds, one file each
   backtest.ts           replays saved data through the same code, paying for each answer once
   analyze.ts            report for the market-data path
   news/types.ts         the common format for news items

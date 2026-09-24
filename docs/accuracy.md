@@ -138,9 +138,11 @@ paying less or knowing more (below).
 1. **Pay less per trade.** Resting limit orders (maker) at a zero-fee tier, or a venue with lower
    fees. Whether a resting order fills, and whether it fills mostly when it shouldn't, has to be
    simulated; the recording has every trade, so a cautious simulation is possible.
-2. **Know more.** Prices on other exchanges (Binance, OKX, Bybit) and on Coinbase's perpetual
-   futures often move first. Their public feeds are free to record, and that kind of lead is the
-   most likely source of a 10 to 60 second signal.
+2. **Know more.** Prices on other exchanges often move first, and that kind of lead is the most
+   likely source of a 10 to 60 second signal. Binance's and Bybit's main sites refuse connections
+   from the US, so the Pi records Binance.US instead, whose market makers most likely price off
+   them (`npm run record:binanceus`, [decisions.md](decisions.md#d58-binanceus-is-recorded-next-to-coinbase-by-a-program-of-its-own)).
+   Coinbase's own perpetual futures are another candidate.
 3. **Go longer, with news.** News moves prices by far more than 10 bp, which is why the news path
    exists.
 4. **Jev on market data isn't earning its keep** at these horizons (about $3 a day for one

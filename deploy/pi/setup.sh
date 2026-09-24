@@ -3,6 +3,7 @@
 #
 #   ./deploy/pi/setup.sh                    install and start the news pipeline
 #   ./deploy/pi/setup.sh --service record   run "save Coinbase data" instead (or: live)
+#   ./deploy/pi/setup.sh --service record-binanceus  also save Binance.US data (BTC/USD, BTC/USDT)
 #   ./deploy/pi/setup.sh --service dashboard  also run the live dashboard (see docs/dashboard.md)
 #   ./deploy/pi/setup.sh --no-start         install everything but don't start it yet
 #   ./deploy/pi/setup.sh --dry-run          show what would happen without changing anything
@@ -14,7 +15,7 @@ DRY_RUN=0
 NODE_MAJOR=24
 
 usage() {
-  sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -30,8 +31,9 @@ done
 
 case "$SERVICE" in
   news | news-live) SERVICE=news-live ;;
+  binanceus | record-binanceus) SERVICE=record-binanceus ;;
   record | live | dashboard) ;;
-  *) echo "--service must be news, record, live, or dashboard" >&2; exit 1 ;;
+  *) echo "--service must be news, record, record-binanceus, live, or dashboard" >&2; exit 1 ;;
 esac
 
 PROJECT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -96,7 +98,7 @@ has_key() { [ -f .env ] && grep -qE "^$1=.+" .env; }
 provider="$( (grep -E '^JEV_PROVIDER=' .env 2>/dev/null || true) | tail -1 | cut -d= -f2- | tr -d '"')"
 # Saving market data and showing the dashboard never call Jev, so they need no key for it.
 # Each route needs its own: TYPESAFE_AI_API_KEY by default, AI_GATEWAY_API_KEY for the gateway.
-if [ "$SERVICE" != record ] && [ "$SERVICE" != dashboard ]; then
+if [ "$SERVICE" != record ] && [ "$SERVICE" != record-binanceus ] && [ "$SERVICE" != dashboard ]; then
   case "${provider:-typesafe}" in
     gateway) needed=AI_GATEWAY_API_KEY ;;
     typesafe) needed=TYPESAFE_AI_API_KEY ;;

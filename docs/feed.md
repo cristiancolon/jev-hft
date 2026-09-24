@@ -59,6 +59,49 @@ Things worth knowing:
 While the feed is broken (from the last good message until the next snapshot) the market state
 treats Bitcoin's price as unknown rather than unchanged ([market.md](market.md#the-market-state-statets)).
 
+## Bitcoin from Binance.US (`binanceus.ts`)
+
+Recorded by `npm run record:binanceus` (on the Pi, the `jev-hft@record-binanceus` service), for
+research only: nothing trades on it yet. It saves BTC/USD and BTC/USDT by default
+(`BINANCEUS_SYMBOLS`), one file each, in the same standard form as Coinbase's, so a recording
+replays through the same market state and the research scripts
+([accuracy.md](accuracy.md)).
+
+**Why record it:** Binance.US charges nothing for resting orders, and its market makers most
+likely price off the big exchanges that refuse connections from the US (Binance's and Bybit's
+main sites answered the Pi with "not available here"). So its quotes may move before Coinbase's,
+or after them, and either would be worth knowing
+([decisions.md](decisions.md#d58-binanceus-is-recorded-next-to-coinbase-by-a-program-of-its-own)).
+It is a small market: about 4,000 BTC/USD trades and $1M a day in September 2026, against
+Coinbase's hundreds of millions, so its book matters more than its trades.
+
+We listen to two public streams, no account needed:
+
+- **the order book's changes, every 100 ms** (`depth@100ms`), plus a snapshot of the whole book
+  fetched over the web when connecting. The book was about 600 levels a side.
+- **every trade** (`trade`).
+
+Things worth knowing:
+
+- **The book is rebuilt the way Binance says to**, and any missing update means starting over:
+  the changes are held while the snapshot is fetched, the ones it already includes are dropped,
+  and from then on each change must begin exactly where the last one ended. The rules live in
+  `DepthSync`, which touches no network, so the tests check each one directly.
+- **The snapshot has no time on it,** so the rebuilt book is stamped with the moment it arrived,
+  and so are the changes held while waiting for it. That is when the book became known, and it
+  keeps every recording in time order.
+- **Binance labels a trade by whether the buyer was the waiting side** (`m`). When it was, the
+  seller made the trade happen, and the feed flips it accordingly. In a first three-minute live
+  check both trades printed on the side the label says (a sell at the bid, a buy at the ask); the
+  book never crossed and matched a fresh snapshot at the end. Two trades is thin evidence, so it
+  is worth checking again on a longer recording (step 3 below).
+- **Its server pings every 20 seconds** and drops connections that don't answer within a minute
+  (since 30 July 2026). Node answers pings by itself; a 90-second test from the Pi stayed
+  connected. Changes came every 190 ms at the median and never more than 2.1 s apart, so 30
+  seconds of silence counts as a dead connection.
+- **Delay:** changes arrived 55 to 65 ms after Binance stamped them (this Mac, and the Pi). Being batched every
+  100 ms, the book is seen in 100 ms steps; trades arrive one by one.
+
 ## Stock prices from Alpaca (`alpaca.ts`, `alpaca-stocks.ts`)
 
 Alpaca provides US stock prices and news. `alpaca.ts` handles the connection for both: signing
