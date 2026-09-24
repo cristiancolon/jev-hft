@@ -86,6 +86,7 @@ check later whether Jev's judgments were right, and whether they arrived fast en
 | [testing.md](testing.md) | What the tests protect, and how the engines are tested without the outside world. |
 | [operations.md](operations.md) | Running things, every setting, costs, fixing common problems, running on a Raspberry Pi. |
 | [decisions.md](decisions.md) | A numbered log of every major design decision: what we chose, why, and when to rethink it. |
+| [handoff-accuracy.md](handoff-accuracy.md) | Where the 10 s / 60 s accuracy work stands: the data, the first findings, and what to try next. |
 
 ## Glossary
 
