@@ -131,7 +131,7 @@ function frame() {
         view.renderPnl('pnl', state.pnl?.corrected ?? null, horizonS, state.pnl?.asAnswered ?? null);
         view.renderPnl('fpnl', state.pnl?.selective ?? null, horizonS);
         // A dashboard server from before the order-book rule existed sends no such card.
-        view.renderPnl('opnl', state.pnl?.orderBook ?? null, horizonS, null, state.pnl?.orderBookReach ?? []);
+        view.renderPnl('opnl', state.pnl?.orderBook ?? null, horizonS);
         equity.setData(state.pnl?.corrected.legs.find(l => l.horizonS === horizonS)?.curve ?? []);
         fequity.setData(state.pnl?.selective.legs.find(l => l.horizonS === horizonS)?.curve ?? []);
         oequity.setData(state.pnl?.orderBook?.legs.find(l => l.horizonS === horizonS)?.curve ?? []);

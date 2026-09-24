@@ -39,32 +39,44 @@ Everything the pipeline is doing, as it does it:
   taken out, which is what the pipeline acts on, and as answered, so the gap between them stays
   in view. Only decisions where the price actually moved are counted, and nothing is shown until
   there are at least 20 of those.
-- **If you had traded every answer:** the running total of what following Jev would have made,
+- **If you had traded Jev's answers:** the running total of what following Jev would have made,
   with the curve over the run, how many trades went which way, and the worst dip along the way.
-  The rule is the plainest one that could really have been followed: every call is traded, all
-  the same size, taking Jev's side at the mid price the moment the answer arrived and closing at
-  the horizon. Answers with no lean sit out. The buttons above the price chart pick which horizon
-  it is worked out for.
+  The rule is the plainest one that could really have been followed: take Jev's side at the mid
+  price the moment the answer arrived, all the same size, and close at the horizon, but only
+  when the call is expected to catch more than the round trip costs. Answers with no lean sit
+  out. The buttons above the price chart pick which horizon it is worked out for.
 
-  "At face value" on the same card is what that rule made with Jev's answers taken as they came.
-  It is there as a yardstick: the correction was chosen on one day's data, and this shows, on
-  every run since, whether it is still earning its place.
+  Jev doesn't say how far the price will move, so what a call is expected to catch comes from its
+  track record: what earlier calls of about the same strength caught over the last four hours,
+  counting only calls that had finished by then, less a margin for luck
+  ([decisions.md](decisions.md) D59). At a taker's fees Jev's calls don't clear that bar: they
+  catch a few tenths of a basis point, and a round trip costs several. So "no trades" is the
+  usual state of this card, and it then says how close the calls came, and what all of them would
+  have made had each been traded whatever it cost. That keeps a signal that is right but too
+  small to trade apart from one that is simply wrong. A new run trades nothing for its first few
+  minutes, until there are 50 finished calls of a strength to judge by.
+
+  "At face value" on the same card is the same rule with Jev's answers taken as they came: its
+  trades after costs, and what all its calls were worth before them. It is there as a yardstick:
+  the correction was chosen on one day's data, and this shows, on every run since, whether it is
+  still earning its place.
 
   Two things are worth keeping in mind when reading it. Trades overlap, so it assumes you could
   hold several at once. And every trade pays what trading really costs: the exchange's fee on
-  both fills (`FEE_BPS_PER_SIDE`, 5 bp by default, Coinbase's cheapest taker rate) and the spread
-  it would have crossed. "Before costs" shows what the moves alone were worth and "costs" what
-  paying for them took, so a signal that is right but too small to trade can be told from one
-  that is wrong. "Went your way" is measured before costs, so it says how often the call itself
-  was right. Over short horizons the price is often exactly where it started, and those trades
-  are counted separately rather than as losses.
+  both fills (`FEE_BPS_PER_SIDE`, 5 bp by default) and the spread it would have crossed. "Before
+  costs" shows what the moves alone were worth and "costs" what paying for them took. "Went your
+  way" is measured before costs, so it says how often the call itself was right. Over short
+  horizons the price is often exactly where it started, and those trades are counted separately
+  rather than as losses.
 - **If you had traded selectively:** the same calls under a more careful rule, right next to the
   first so the two can be compared. It trades only when the best level of the order book points
   the same way as Jev, because when the two disagreed Jev was right less than half the time. It
-  sits out if a headline from the last 15 minutes leans the other way. And it stakes more on a
+  sits out if a headline from the last 15 minutes leans the other way. It stakes more on a
   stronger lean: an ordinary lean gets the normal stake, a lean twice as strong as usual gets
-  twice that, and nothing gets more. Stakes average out at about the normal one, so the two
-  cards' totals can be compared directly; "average per stake" is what each unit staked made.
+  twice that, and nothing gets more. And like the first card, it trades a call only when its own
+  track record, the earlier calls the book also agreed with, says the call will pay for itself.
+  Stakes average out at about the normal one, so the two cards' totals can be compared directly;
+  "average per stake" is what each unit staked made.
 
   Most of this rule's accuracy comes from the order book, not from Jev. The book alone points the
   right way about two times in three at 2 seconds. Jev's agreement adds a few points on top of
@@ -73,12 +85,11 @@ Everything the pipeline is doing, as it does it:
 - **If you had traded the order-book model:** no Jev at all. The order-book model
   ([accuracy.md](accuracy.md)) says how far it expects the price to move, and this card takes a
   call only when that is more than the round trip would cost, and at 10 seconds only when the last
-  minute was calm and the spread one tick, where the model was right most often. It is the only
-  card that looks at the cost before trading. At any fee Coinbase publishes it takes almost
-  nothing, because the model's best calls expect well under a basis point, so when it has no
-  trades it says how close it came: how many calls came in a calm market, the biggest move the
-  model expected, and what a round trip cost. That gap is the finding, not a fault. Set
-  `FEE_BPS_PER_SIDE=0` to see what it would do with no fees.
+  minute was calm and the spread one tick, where the model was right most often. At a taker's
+  fees it takes almost nothing, because the model's best calls expect well under a basis point,
+  so when it has no trades it says how close it came: how many calls came in a calm market, the
+  biggest move the model expected, and what a round trip cost. That gap is the finding, not a
+  fault. Set `FEE_BPS_PER_SIDE=0` to see what any of the cards would do with no fees.
 
 The scoreboard has a row for the order-book model too, scored from the snapshot like the other
 simple rules, since it takes microseconds.

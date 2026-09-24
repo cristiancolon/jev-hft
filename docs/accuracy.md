@@ -127,10 +127,11 @@ paying less or knowing more (below).
   (`FEE_BPS_PER_SIDE`, 5 by default) and the spread (`src/model/costs.ts`). Each also keeps what
   the moves alone were worth, so a signal that is right but too small to trade can be told apart
   from one that is wrong.
-- **A new dashboard card trades the order-book model**, and it is the only rule that looks at
-  the cost first: it takes a call only when the move the model expects is bigger than the round
-  trip, and at 10 s only in a calm market. At real fees it takes almost nothing, and the card says
-  how close it came ([dashboard.md](dashboard.md)).
+- **A new dashboard card trades the order-book model**, and looks at the cost first: it takes a
+  call only when the move the model expects is bigger than the round trip, and at 10 s only in a
+  calm market. At real fees it takes almost nothing, and the card says how close it came
+  ([dashboard.md](dashboard.md)). Jev's cards now weigh the cost the same way, judging each call
+  by what earlier calls like it caught (decisions.md D59).
 - **The scoreboard and the report score the order-book model** next to Jev and the simple rules.
 
 ## Where an edge could still come from

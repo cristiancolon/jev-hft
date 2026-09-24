@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { pnlReport } from '../src/dashboard/pnl.ts';
+import { MIN_TRACK_CALLS, TrackRecord } from '../src/dashboard/track.ts';
 import type { DecisionRecord } from '../src/engine.ts';
 import type { RidgeModel } from '../src/model/ridge.ts';
 import type { NewsRecord } from '../src/news/engine.ts';
@@ -50,8 +51,22 @@ function newsRecord(over: Partial<NewsRecord> = {}): NewsRecord {
 const model = (horizonS: number, gate: boolean) => ({ horizonS, calm: { gate, vol60Below: 0.6, maxSpreadTicks: 1, tickUsd: 0.01 } }) as RidgeModel;
 const MODELS = [model(10, true), model(60, false)];
 
-const leg = (rule: 'asAnswered' | 'corrected' | 'selective' | 'orderBook') => (recs: DecisionRecord[], horizonS = 10, opts = OPTS, news: NewsRecord[] = []) =>
-  pnlReport(recs, opts, news, MODELS)[rule].legs.find(l => l.horizonS === horizonS)!;
+/**
+ * Earlier finished calls for Jev's rules to judge by: `n` calls at each of `leans` (at the default
+ * typical lean of 0.5, 0.1 / 0.3 / 0.75 / 1 fall in the four strength bands), an hour before the
+ * decisions under test, each of which caught `caughtBp`.
+ */
+function track(n: number, caughtBp: number, { from = -3600, leans = [0.1, 0.3, 0.75, 1] } = {}): DecisionRecord[] {
+  const out: DecisionRecord[] = [];
+  let i = from;
+  for (const lean of leans) for (let k = 0; k < n; k++) out.push(decision(i++, caughtBp, lean));
+  return out;
+}
+/** A record that every call pays for itself many times over, so the tests of how trades are counted are not about the cost check. */
+const PROVEN = track(MIN_TRACK_CALLS, 50);
+
+const leg = (rule: 'asAnswered' | 'corrected' | 'selective' | 'orderBook') => (recs: DecisionRecord[], horizonS = 10, opts = OPTS, news: NewsRecord[] = [], past = PROVEN) =>
+  pnlReport(recs, opts, news, MODELS, TrackRecord.from([...past, ...recs]))[rule].legs.find(l => l.horizonS === horizonS)!;
 const asAnswered = leg('asAnswered');
 const corrected = leg('corrected');
 const selective = leg('selective');
@@ -144,8 +159,8 @@ test('the curve is the running total, and stays small enough to send often', () 
 
 test('nothing to report is reported as nothing, not as zero profit', () => {
   const set = pnlReport([], OPTS, [], MODELS);
-  assert.deepEqual(set.orderBookReach.map(r => [r.calls, r.largestBps, r.meanCostBps]), [[0, null, null], [0, null, null], [0, null, null]]);
   for (const report of [set.asAnswered, set.corrected, set.selective, set.orderBook]) {
+    assert.deepEqual(report.reach.map(r => [r.calls, r.weighed, r.largestBps, r.meanCostBps]), [[0, 0, null, null], [0, 0, null, null], [0, 0, null, null]]);
     assert.equal(report.n, 0);
     assert.equal(report.since, null);
     assert.deepEqual(
@@ -182,9 +197,12 @@ test('corrected: no call is made while the usual lean is not known yet', () => {
   // The first minute of a run, as it comes back from a file: what was NaN is saved as null.
   rec.signals.jevc_10s = null as unknown as number;
   rec.lean!.dir_10s = { usual: null as unknown as number, typical: null as unknown as number };
-  assert.equal(asAnswered([rec]).trades, 1);
-  assert.equal(corrected([rec]).trades, 0);
-  assert.equal(selective([rec]).trades, 0);
+  const set = pnlReport([rec], OPTS, [], MODELS, TrackRecord.from([...PROVEN, rec]));
+  const calls = (report: typeof set.corrected) => report.reach.find(r => r.horizonS === 10)!.calls;
+  assert.equal(calls(set.asAnswered), 1, 'at face value there is a call');
+  assert.equal(asAnswered([rec]).trades, 0, 'but with nothing to measure its strength against, no telling what it is worth');
+  assert.equal(calls(set.corrected), 0);
+  assert.equal(calls(set.selective), 0);
 });
 
 test('corrected: a record from before leans were read this way is not traded, rather than guessed at', () => {
@@ -306,9 +324,9 @@ test('orderBook: at 60 s, where calm made no difference, it does not wait for it
 
 test('orderBook: says how close it came when it took nothing', () => {
   const recs = [obDecision(0, 5, 0.4), obDecision(1, 5, -0.7), obDecision(2, 5, 3, 0.9), decision(3, 5, 1)];
-  const reach = pnlReport(recs, { ...OPTS, feeBpsPerSide: 5 }, [], MODELS).orderBookReach.find(r => r.horizonS === 10)!;
+  const reach = pnlReport(recs, { ...OPTS, feeBpsPerSide: 5 }, [], MODELS).orderBook.reach.find(r => r.horizonS === 10)!;
   assert.equal(reach.calls, 3, 'the record without an order-book call is not counted');
-  assert.equal(reach.calm, 2);
+  assert.equal(reach.weighed, 2, 'the volatile one was never weighed');
   near(reach.largestBps!, 0.7, 'the biggest expectation among calm calls, whichever way');
   near(reach.meanCostBps!, 11, 'two 5 bp fees and a 1 bp spread');
   assert.equal(orderBook(recs, 10, { ...OPTS, feeBpsPerSide: 5 }).trades, 0);
@@ -316,4 +334,94 @@ test('orderBook: says how close it came when it took nothing', () => {
 
 test('orderBook: a record from before the model existed is never traded', () => {
   assert.equal(orderBook([decision(0, 5, 1)]).trades, 0);
+});
+
+test('orderBook: what every call would have made, traded whatever it cost, is kept too', () => {
+  const recs = [obDecision(0, 5, 0.4), obDecision(1, -3, 0.2, 0.9)];
+  const reach = pnlReport(recs, { ...OPTS, feeBpsPerSide: 5 }, [], MODELS).orderBook.reach.find(r => r.horizonS === 10)!;
+  assert.deepEqual([reach.calls, reach.right, reach.wrong], [2, 1, 1], 'the volatile one included');
+  near(reach.grossBps, 2);
+  near(reach.costBps, 2 * 11);
+});
+
+// ---- Jev: a call is traded only when its track record beats the cost ----------------------------
+
+test('Jev: a call is traded only when calls like it caught more than the round trip costs', () => {
+  // Weak leans have caught 1 bp each and strong ones 4 bp; two 1 bp fees make a round trip 2 bp.
+  const past = [...track(MIN_TRACK_CALLS, 1, { leans: [0.1] }), ...track(MIN_TRACK_CALLS, 4, { from: -3000, leans: [0.75] })];
+  const l = corrected([decision(0, 5, 0.1), decision(1, 5, 0.75)], 10, { ...OPTS, feeBpsPerSide: 1 }, [], past);
+  assert.equal(l.trades, 1, 'the weak lean sat out');
+  near(l.grossBps, 5);
+  assert.equal(corrected([decision(0, 5, 0.1)], 10, OPTS, [], past).trades, 1, 'with no fees, 1 bp is enough');
+});
+
+test('Jev: only calls that had finished by then count', () => {
+  // Fifty calls made five seconds earlier: over 2 s they had finished, over 10 s they had not.
+  const past = Array.from({ length: MIN_TRACK_CALLS }, (_, k) => decision(-5 - k / 100, 50, 0.75));
+  const rec = decision(0, 5, 0.75);
+  assert.equal(corrected([rec], 10, OPTS, [], past).trades, 0);
+  assert.equal(corrected([rec], 2, OPTS, [], past).trades, 1);
+});
+
+test('Jev: calls older than four hours no longer count', () => {
+  assert.equal(corrected([decision(0, 5, 0.75)], 10, OPTS, [], track(MIN_TRACK_CALLS, 50, { from: -5 * 3600, leans: [0.75] })).trades, 0);
+  assert.equal(corrected([decision(0, 5, 0.75)], 10, OPTS, [], track(MIN_TRACK_CALLS, 50, { from: -3 * 3600, leans: [0.75] })).trades, 1);
+});
+
+test('Jev: too few calls like it is nothing to judge by', () => {
+  assert.equal(corrected([decision(0, 5, 0.75)], 10, OPTS, [], track(MIN_TRACK_CALLS - 1, 50, { leans: [0.75] })).trades, 0);
+  assert.equal(corrected([decision(0, 5, 0.75)], 10, OPTS, [], track(MIN_TRACK_CALLS, 50, { leans: [0.75] })).trades, 1);
+});
+
+test('Jev: calls of a different strength say nothing about this one', () => {
+  // Plenty of strong calls that paid, and none as weak as this one.
+  assert.equal(corrected([decision(0, 5, 0.1)], 10, OPTS, [], track(200, 50, { leans: [0.75] })).trades, 0);
+});
+
+test('Jev: an average that luck could explain is not enough, and calls close together count as fewer', () => {
+  // Calls that caught +13 and -7 bp in turn: 3 bp on average, give or take 10.
+  const swing = (spacingS: number) => Array.from({ length: 60 }, (_, k) => decision(-3600 + k * spacingS, k % 2 ? -7 : 13, 0.75));
+  // A second apart, sixty 10 s calls cover one minute: about seven separate outcomes, and 3 bp could easily be luck.
+  assert.equal(corrected([decision(0, 5, 0.75)], 10, OPTS, [], swing(1)).trades, 0);
+  // Twenty seconds apart, they are sixty separate outcomes, and 3 bp is clear of luck.
+  assert.equal(corrected([decision(0, 5, 0.75)], 10, OPTS, [], swing(20)).trades, 1);
+});
+
+test('Jev: each rule is judged by its own calls', () => {
+  // The calls the book agreed with won; the ones it disagreed with lost more.
+  const past = [
+    ...Array.from({ length: 60 }, (_, k) => decision(-3600 + k, 20, 0.75, { book: 0.5 })),
+    ...Array.from({ length: 60 }, (_, k) => decision(-3000 + k, -30, 0.75, { book: -0.5 })),
+  ];
+  const rec = decision(0, 5, 0.75, { book: 0.5 });
+  assert.equal(selective([rec], 10, OPTS, [], past).trades, 1, 'the selective rule only ever made the winning calls');
+  assert.equal(corrected([rec], 10, OPTS, [], past).trades, 0, 'the corrected rule made both, and lost on balance');
+});
+
+test('Jev: traded or not, what every call would have made is kept', () => {
+  // No track record at all, so nothing is traded, but every call is still counted.
+  const set = pnlReport([decision(0, 4, 0.5), decision(1, -2, 0.5), decision(2, 0, 0.5)], { ...OPTS, feeBpsPerSide: 1 }, [], MODELS);
+  const r = set.corrected.reach.find(x => x.horizonS === 10)!;
+  assert.equal(set.corrected.legs.find(x => x.horizonS === 10)!.trades, 0);
+  assert.deepEqual([r.calls, r.right, r.wrong, r.weighed], [3, 1, 1, 0]);
+  near(r.grossBps, 2);
+  near(r.costBps, 3 * 2, 'two 1 bp fees on each of the three');
+  assert.equal(r.largestBps, null);
+  assert.equal(r.meanCostBps, null);
+});
+
+test('Jev: says how close its calls came when it took nothing', () => {
+  const rec = decision(0, 4, 0.75);
+  const set = pnlReport([rec], { ...OPTS, feeBpsPerSide: 5 }, [], MODELS, TrackRecord.from([...track(MIN_TRACK_CALLS, 0.5, { leans: [0.75] }), rec]));
+  const r = set.corrected.reach.find(x => x.horizonS === 10)!;
+  assert.equal(set.corrected.legs.find(x => x.horizonS === 10)!.trades, 0);
+  assert.equal(r.weighed, 1);
+  near(r.largestBps!, 0.5, 'calls like it caught half a basis point');
+  near(r.meanCostBps!, 10);
+});
+
+test('Jev: left to itself, the report learns from the decisions it is given', () => {
+  // A call a second, each catching 10 bp: at 10 s, only the last had fifty finished calls before it.
+  const recs = [...Array.from({ length: 59 }, (_, k) => decision(k, 10, 0.75)), decision(200, 10, 0.75)];
+  assert.equal(pnlReport(recs, OPTS, [], MODELS).corrected.legs.find(x => x.horizonS === 10)!.trades, 1);
 });

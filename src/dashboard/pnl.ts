@@ -1,8 +1,8 @@
-// What trading on Jev's answers would have made, under three rules.
+// What trading on Jev's answers would have made, under three rules, next to the order-book model.
 //
-// "asAnswered" takes every answer at face value: when Jev leans a way, take that side at the price
-// its answer arrived at, hold for the horizon, close at the mid. Every lean is traded, all the
-// same size. It is kept as the yardstick the other two are measured against.
+// "asAnswered" takes Jev's answers at face value: when Jev leans a way, take that side at the
+// price its answer arrived at, hold for the horizon, close at the mid, all the same size. It is
+// kept as the yardstick the other two are measured against.
 //
 // "corrected" is the same rule with Jev's usual lean taken out first (src/model/lean.ts). Jev
 // leans "down" most of the time whatever the market is about to do, so at face value four trades
@@ -14,15 +14,17 @@
 // on a stronger lean. When Jev and the book disagreed, Jev was right less than half the time, so
 // its dissent is not worth acting on (docs/decisions.md D51).
 //
-// "orderBook" trades the order-book model (src/model/ridge.ts) instead of Jev. It is the only
-// rule that looks at the cost before trading: the model says how far it expects the price to
-// move, so a call is taken only when that is more than the round trip would cost, and at 10 s
-// only in the calm markets where the model was right most often (docs/accuracy.md). At any fee
-// Coinbase publishes that is almost never, which is the finding, not a fault.
+// "orderBook" trades the order-book model (src/model/ridge.ts) instead of Jev, and at 10 s only
+// in the calm markets where the model was right most often (docs/accuracy.md).
 //
-// Every rule pays for every trade: the exchange's fee on the way in and on the way out, and the
-// spread (src/model/costs.ts). Each leg also keeps what the moves alone were worth, so a signal
-// that is right but too small to trade can be told from one that is simply wrong.
+// Every rule weighs the cost before it trades: a call is taken only when it is expected to catch
+// more than the round trip costs, the exchange's fee on the way in and on the way out plus the
+// spread (src/model/costs.ts). The order-book model says how far it expects the price to move.
+// Jev doesn't, so its calls are judged by their track record: what earlier calls of about the
+// same strength caught, less a margin for luck (src/dashboard/track.ts, docs/decisions.md D59).
+// At a taker's fees that is almost never, which is the finding, not a fault. What every call
+// would have made, traded whatever it cost, is kept beside each rule, so a signal that is right
+// but too small to trade can be told from one that is simply wrong.
 //
 // No rule looks at how the run turned out before deciding what to trade, which is the difference
 // between this and the "net edge" in the report (src/analyze.ts): that one sorts the whole run
@@ -31,11 +33,11 @@
 import type { DecisionRecord } from '../engine.ts';
 import { bps, num } from '../lib/stats.ts';
 import { roundTripBps } from '../model/costs.ts';
-import { DIRECTIONS, type DirectionId } from '../model/jev.ts';
-import { conviction } from '../model/lean.ts';
+import { DIRECTIONS } from '../model/jev.ts';
 import { calmEnough, orderBookModels, type RidgeModel } from '../model/ridge.ts';
 import type { NewsRecord } from '../news/engine.ts';
-import type { OrderBookReach, Pnl, PnlLeg, PnlSet } from './collector.ts';
+import type { Pnl, PnlLeg, PnlSet, Reach } from './collector.ts';
+import { expectations, jevCall, TrackRecord, type JevRule } from './track.ts';
 
 /** Points kept for drawing the running total: enough for a smooth line, small enough to send often. */
 const CURVE_POINTS = 240;
@@ -45,6 +47,8 @@ const MAX_STAKE = 2;
 const NEWS_LOOKBACK_MS = 15 * 60_000;
 /** Extra size when a recent, relevant headline leans the same way Jev does. */
 const NEWS_AGREEMENT_BOOST = 0.25;
+
+const HORIZONS: number[] = Object.values(DIRECTIONS).map(d => d.seconds);
 
 export type PnlOptions = {
   /** The exchange's fee on each fill, in bps; a round trip pays it twice, and the spread on top. */
@@ -58,78 +62,66 @@ export type PnlOptions = {
 /** A trade to take, and how much of a full-size stake to put on it; null means sit this one out. */
 type Decision = { dir: 1 | -1; sizeFraction: number } | null;
 
+/**
+ * A way of trading: the call it would make on a decision, whatever that would cost, and what it
+ * expects the call to catch in the call's own direction, in bps. NaN when it can't say, or, for
+ * the order-book model at 10 s, won't in this market.
+ */
+type Rule = {
+  call: (rec: DecisionRecord, horizonS: number) => Decision;
+  expects: (rec: DecisionRecord, horizonS: number) => number;
+};
+
 /** A lean worth trading: a number that points one way or the other. */
 function direction(signal: unknown): 1 | -1 | null {
   return typeof signal === 'number' && Number.isFinite(signal) && signal !== 0 ? (Math.sign(signal) as 1 | -1) : null;
 }
 
-function asAnsweredDecision(rec: DecisionRecord, horizonS: number): Decision {
-  const dir = direction(rec.signals[`jev_${horizonS}s`]);
-  return dir ? { dir, sizeFraction: 1 } : null;
-}
-
-/** While Jev's usual lean is not known yet (the first minute of a run) there is no corrected lean, and so no trade. */
-function correctedDecision(rec: DecisionRecord, horizonS: number): Decision {
-  const dir = direction(rec.signals[`jevc_${horizonS}s`]);
-  return dir ? { dir, sizeFraction: 1 } : null;
-}
-
 /**
- * `news` must already be about the traded instrument and sorted ascending by `tResp`. Only records
- * with `tResp <= rec.tState` are ever looked at, so a headline is never used before its answer
- * actually existed.
+ * Jev's call under one of its rules, before the cost is weighed. `news` must already be about the
+ * traded instrument and sorted ascending by `tResp`. Only records with `tResp <= rec.tState` are
+ * ever looked at, so a headline is never used before its answer actually existed.
  */
-function selectiveDecision(rec: DecisionRecord, horizonS: number, news: readonly NewsRecord[]): Decision {
-  const corrected = rec.signals[`jevc_${horizonS}s`];
-  const dir = direction(corrected);
-  if (!dir) return null;
+function jevDecision(rule: JevRule, rec: DecisionRecord, horizonS: number, news: readonly NewsRecord[]): Decision {
+  const call = jevCall(rec, rule, horizonS);
+  if (!call) return null;
+  if (rule !== 'selective') return { dir: call.dir, sizeFraction: 1 };
 
-  if (Math.sign(num(rec.signals.obi1)) !== dir) return null; // the best level of the book does not back this call up
-
-  const recent = news.findLast(n => n.tResp <= rec.tState && rec.tState - n.tResp <= NEWS_LOOKBACK_MS);
-  const newsDir = recent ? Math.sign(recent.signal) : 0;
-  if (newsDir !== 0 && newsDir !== dir) return null; // a fresh headline says the other way
+  const latest = news.findLast(n => n.tResp <= rec.tState);
+  const newsDir = latest && rec.tState - latest.tResp <= NEWS_LOOKBACK_MS ? Math.sign(latest.signal) : 0;
+  if (newsDir !== 0 && newsDir !== call.dir) return null; // a fresh headline says the other way
 
   // Staked in proportion to how strong the lean is next to Jev's ordinary one, so an ordinary
   // lean is one normal stake. TypeSafe's confidence is deliberately not used: it is the
   // probability of the answer Jev picked, which is usually "flat", so it is highest exactly when
   // Jev expects nothing to happen.
-  const strength = conviction(corrected as number, rec.lean?.[`dir_${horizonS}s` as DirectionId]);
-  if (Number.isNaN(strength)) return null;
-  const sizeFraction = Math.min(MAX_STAKE, strength) * (newsDir === dir ? 1 + NEWS_AGREEMENT_BOOST : 1);
-  return { dir, sizeFraction };
+  if (Number.isNaN(call.strength)) return null;
+  const sizeFraction = Math.min(MAX_STAKE, call.strength) * (newsDir === call.dir ? 1 + NEWS_AGREEMENT_BOOST : 1);
+  return { dir: call.dir, sizeFraction };
 }
 
-/**
- * The order-book model's call, taken only when the move it expects is bigger than what the
- * round trip would cost, and, where its model says so, only in a calm market.
- */
-function orderBookDecision(rec: DecisionRecord, horizonS: number, feeBpsPerSide: number, models: readonly RidgeModel[]): Decision {
-  const expected = rec.signals[`ob_${horizonS}s`];
-  const dir = direction(expected);
-  if (!dir) return null;
-  const model = models.find(m => m.horizonS === horizonS);
-  if (model && !calmEnough(model, rec.vol60, rec.quote ? rec.quote.ask - rec.quote.bid : undefined)) return null;
-  if (Math.abs(expected as number) <= roundTripBps(rec, feeBpsPerSide)) return null; // it would not pay for itself
-  return { dir, sizeFraction: 1 };
+/** One of Jev's rules, expecting of each call what earlier calls like it caught. */
+function jevRule(rule: JevRule, recs: readonly DecisionRecord[], track: TrackRecord, news: readonly NewsRecord[]): Rule {
+  const expected = new Map(HORIZONS.map(h => [h, expectations(recs, rule, h, track)]));
+  return {
+    call: (rec, horizonS) => jevDecision(rule, rec, horizonS, news),
+    expects: (rec, horizonS) => expected.get(horizonS)?.get(rec) ?? NaN,
+  };
 }
 
-function orderBookReach(recs: DecisionRecord[], horizonS: number, feeBpsPerSide: number, models: readonly RidgeModel[]): OrderBookReach {
-  const model = models.find(m => m.horizonS === horizonS);
-  let calls = 0;
-  let calm = 0;
-  let largest: number | null = null;
-  let costs = 0;
-  for (const rec of recs) {
-    const expected = rec.signals[`ob_${horizonS}s`];
-    if (typeof expected !== 'number' || !Number.isFinite(expected)) continue;
-    calls++;
-    if (model && !calmEnough(model, rec.vol60, rec.quote ? rec.quote.ask - rec.quote.bid : undefined)) continue;
-    calm++;
-    largest = Math.max(largest ?? 0, Math.abs(expected));
-    costs += roundTripBps(rec, feeBpsPerSide);
-  }
-  return { horizonS, calls, calm, largestBps: largest, meanCostBps: calm > 0 ? costs / calm : null };
+/** The order-book model's call and the move it expects, heard only in a calm market where its model says so. */
+function orderBookRule(models: readonly RidgeModel[]): Rule {
+  return {
+    call: (rec, horizonS) => {
+      const dir = direction(rec.signals[`ob_${horizonS}s`]);
+      return dir ? { dir, sizeFraction: 1 } : null;
+    },
+    expects: (rec, horizonS) => {
+      const model = models.find(m => m.horizonS === horizonS);
+      if (model && !calmEnough(model, rec.vol60, rec.quote ? rec.quote.ask - rec.quote.bid : undefined)) return NaN;
+      return Math.abs(num(rec.signals[`ob_${horizonS}s`]));
+    },
+  };
 }
 
 /** Evenly spaced points, keeping the first and the last. */
@@ -139,7 +131,7 @@ function thin<T>(xs: T[], most: number): T[] {
   return Array.from({ length: most }, (_, i) => xs[Math.round(i * step)]!);
 }
 
-function leg(recs: DecisionRecord[], horizonS: number, feeBpsPerSide: number, decide: (rec: DecisionRecord, horizonS: number) => Decision): PnlLeg {
+function leg(recs: readonly DecisionRecord[], horizonS: number, feeBpsPerSide: number, decide: (rec: DecisionRecord, horizonS: number) => Decision): PnlLeg {
   const curve: { t: number; cumBps: number }[] = [];
   let total = 0;
   let gross = 0;
@@ -198,30 +190,65 @@ function leg(recs: DecisionRecord[], horizonS: number, feeBpsPerSide: number, de
   };
 }
 
-function report(recs: DecisionRecord[], { feeBpsPerSide, notionalUsd }: PnlOptions, decide: (rec: DecisionRecord, horizonS: number) => Decision): Pnl {
+/**
+ * How near a rule came to trading at one horizon: every call it made whose outcome is known,
+ * traded whatever it cost, and the calls it could weigh against the cost, with the most any of
+ * those was expected to catch and what a round trip cost on average among them.
+ */
+function reach(recs: readonly DecisionRecord[], horizonS: number, feeBpsPerSide: number, rule: Rule): Reach {
+  const every = leg(recs, horizonS, feeBpsPerSide, rule.call);
+  let weighed = 0;
+  let largest: number | null = null;
+  let costs = 0;
+  for (const rec of recs) {
+    if (!rule.call(rec, horizonS) || !Number.isFinite(bps(rec.fwdResp[horizonS], rec.midResp))) continue;
+    const expected = rule.expects(rec, horizonS);
+    if (!Number.isFinite(expected)) continue;
+    weighed++;
+    largest = Math.max(largest ?? -Infinity, expected);
+    costs += roundTripBps(rec, feeBpsPerSide);
+  }
+  const { trades: calls, right, wrong, grossBps, costBps, staked } = every;
+  return { horizonS, calls, right, wrong, grossBps, costBps, staked, weighed, largestBps: largest, meanCostBps: weighed > 0 ? costs / weighed : null };
+}
+
+function report(recs: readonly DecisionRecord[], { feeBpsPerSide, notionalUsd }: PnlOptions, rule: Rule): Pnl {
+  const traded = (rec: DecisionRecord, horizonS: number): Decision => {
+    const decision = rule.call(rec, horizonS);
+    return decision && rule.expects(rec, horizonS) > roundTripBps(rec, feeBpsPerSide) ? decision : null; // otherwise it would not pay for itself
+  };
   return {
     n: recs.length,
     since: recs.length > 0 ? Math.min(...recs.map(r => r.tState)) : null,
     feeBpsPerSide,
     notionalUsd,
-    legs: Object.values(DIRECTIONS).map(d => leg(recs, d.seconds, feeBpsPerSide, decide)),
+    legs: HORIZONS.map(h => leg(recs, h, feeBpsPerSide, traded)),
+    reach: HORIZONS.map(h => reach(recs, h, feeBpsPerSide, rule)),
   };
 }
 
 /**
- * All four rules over the same finished decisions. `news` can be every finished news record the
- * dashboard has kept, about any instrument; only ones matching `opts.product` are ever looked at.
- * It can be empty (most sources publish only a few times an hour, so long quiet stretches are
- * normal) and the selective rule simply never gets a fundamental opinion during them. `models`
- * are the order-book models whose calm condition the orderBook rule follows.
+ * All four rules over the same finished decisions, in the order they were made. `news` can be
+ * every finished news record the dashboard has kept, about any instrument; only ones matching
+ * `opts.product` are ever looked at. It can be empty (most sources publish only a few times an
+ * hour, so long quiet stretches are normal) and the selective rule simply never gets a
+ * fundamental opinion during them. `models` are the order-book models whose calm condition the
+ * orderBook rule follows. `track` holds Jev's finished calls; it can reach back before `recs`,
+ * so the first of them are judged by as long a record as the last, and left out it is made from
+ * `recs` alone.
  */
-export function pnlReport(recs: DecisionRecord[], opts: PnlOptions, news: readonly NewsRecord[] = [], models: readonly RidgeModel[] = orderBookModels): PnlSet {
+export function pnlReport(
+  recs: readonly DecisionRecord[],
+  opts: PnlOptions,
+  news: readonly NewsRecord[] = [],
+  models: readonly RidgeModel[] = orderBookModels,
+  track: TrackRecord = TrackRecord.from(recs),
+): PnlSet {
   const relevant = news.filter(n => n.symbol === opts.product);
   return {
-    asAnswered: report(recs, opts, asAnsweredDecision),
-    corrected: report(recs, opts, correctedDecision),
-    selective: report(recs, opts, (rec, h) => selectiveDecision(rec, h, relevant)),
-    orderBook: report(recs, opts, (rec, h) => orderBookDecision(rec, h, opts.feeBpsPerSide, models)),
-    orderBookReach: Object.values(DIRECTIONS).map(d => orderBookReach(recs, d.seconds, opts.feeBpsPerSide, models)),
+    asAnswered: report(recs, opts, jevRule('asAnswered', recs, track, relevant)),
+    corrected: report(recs, opts, jevRule('corrected', recs, track, relevant)),
+    selective: report(recs, opts, jevRule('selective', recs, track, relevant)),
+    orderBook: report(recs, opts, orderBookRule(models)),
   };
 }

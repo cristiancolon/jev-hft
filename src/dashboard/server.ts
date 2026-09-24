@@ -17,6 +17,7 @@ import { config, envNum } from '../config.ts';
 import type { DecisionRecord } from '../engine.ts';
 import { log } from '../lib/run.ts';
 import { fillLeans, LeanBook } from '../model/lean.ts';
+import { orderBookModels } from '../model/ridge.ts';
 import type { NewsRecord } from '../news/engine.ts';
 import { DEFAULT_TELEMETRY_PORT } from '../telemetry/sender.ts';
 import type { TelemetryEvent } from '../telemetry/events.ts';
@@ -24,6 +25,7 @@ import { DashboardState, type DashboardEvent, type ServerEvent } from './collect
 import type { NewsItem } from '../news/types.ts';
 import { liveOutcome, newsOutcome, restoredEntry, scoreboard } from './outcomes.ts';
 import { pnlReport } from './pnl.ts';
+import { TRACK_WINDOW_MS, TrackRecord } from './track.ts';
 
 const HOST = process.env.DASHBOARD_HOST || '127.0.0.1';
 const HTTP_PORT = envNum('DASHBOARD_PORT', 4000, { min: 1 });
@@ -37,6 +39,13 @@ const ITEMS_DIR = 'data/news';
 const SCORE_WINDOW = 3000;
 /** When first opening a records file, read at most this much from its end (a long run can be 100 MB). */
 const BACKFILL_BYTES = 4 * 1024 * 1024;
+/**
+ * The live file's first read reaches further back. Jev's track record (src/dashboard/track.ts)
+ * judges each call by the four hours before it, so after a restart it needs that much behind the
+ * scoreboard's 50 minutes to judge the first calls as it will the last. At about 2 KB a record,
+ * this is some six hours of them.
+ */
+const LIVE_BACKFILL_BYTES = 40 * 1024 * 1024;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const state = new DashboardState();
@@ -86,8 +95,11 @@ udp.bind(UDP_PORT, HOST);
 
 // ---- finished records: what the price did after each decision ---------------------------------
 
-type Tail = { prefix: string; file?: string; offset: number; partial: string };
-const tails: Record<'live' | 'news', Tail> = { live: { prefix: 'live-', offset: 0, partial: '' }, news: { prefix: 'news-', offset: 0, partial: '' } };
+type Tail = { prefix: string; backfill: number; file?: string; offset: number; partial: string };
+const tails: Record<'live' | 'news', Tail> = {
+  live: { prefix: 'live-', backfill: LIVE_BACKFILL_BYTES, offset: 0, partial: '' },
+  news: { prefix: 'news-', backfill: BACKFILL_BYTES, offset: 0, partial: '' },
+};
 let scored: DecisionRecord[] = [];
 let scoreDirty = false;
 /**
@@ -96,6 +108,8 @@ let scoreDirty = false;
  * can still be scored the new way. A record that has its own is left alone.
  */
 let leans = new LeanBook();
+/** Jev's finished calls over the last few hours, which the profit and loss judges each new call by. */
+let track = new TrackRecord();
 /**
  * Finished news about the traded instrument, oldest first, for the selective profit-and-loss
  * strategy's "did a recent headline agree" check. A headline stays useful long after the pipeline
@@ -176,7 +190,7 @@ function readNew(tail: Tail): string[] {
   const size = statSync(path).size;
   let midLine = false;
   if (file !== tail.file) {
-    const offset = Math.max(0, size - BACKFILL_BYTES);
+    const offset = Math.max(0, size - tail.backfill);
     Object.assign(tail, { file, offset, partial: '' });
     midLine = offset > 0; // we are starting somewhere inside a record
   }
@@ -205,14 +219,19 @@ function followRecords() {
     if (tails.live.file !== before) {
       scored = [];
       leans = new LeanBook();
+      track = new TrackRecord();
       scoreDirty = true;
     }
-    for (const rec of fillLeans(fresh, leans)) {
-      publish(liveOutcome(rec));
+    const filled = fillLeans(fresh, leans);
+    // Only the newest can still be on the page; the first read after a restart goes back hours.
+    for (const rec of filled.slice(-SCORE_WINDOW)) publish(liveOutcome(rec));
+    for (const rec of filled) {
+      track.add(rec);
       scored.push(rec);
       scoreDirty = true;
     }
     if (scored.length > SCORE_WINDOW) scored = scored.slice(-SCORE_WINDOW);
+    if (scored.length > 0) track.forget(scored[0]!.tResp - TRACK_WINDOW_MS);
     const finished = parseLines<NewsRecord>(readNew(tails.news));
     // A headline from before the dashboard started gets its answer here, once its record is saved.
     const byItem = Map.groupBy(finished, r => `${r.item.id}|${r.item.recvTs}`);
@@ -228,7 +247,7 @@ function followRecords() {
     if (scoreDirty) {
       scoreDirty = false;
       publish({ type: 'scoreboard', program: 'live', board: scoreboard(scored) });
-      publish({ type: 'pnl', program: 'live', pnl: pnlReport(scored, { feeBpsPerSide: config.feeBpsPerSide, notionalUsd: NOTIONAL_USD, product: config.product }, newsForPnl) });
+      publish({ type: 'pnl', program: 'live', pnl: pnlReport(scored, { feeBpsPerSide: config.feeBpsPerSide, notionalUsd: NOTIONAL_USD, product: config.product }, newsForPnl, orderBookModels, track) });
     }
   } catch (error) {
     log(`reading finished records: ${(error as Error).message}`);

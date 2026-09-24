@@ -192,6 +192,8 @@ src/
   dashboard/server.ts   the dashboard program: listens to the pipeline, reads its results, serves the page
   dashboard/collector.ts  what the dashboard knows and how each message changes it (runs in the server AND the browser)
   dashboard/outcomes.ts scores finished decisions: what happened next, Jev against the simple rules
+  dashboard/pnl.ts      what trading each rule would have made, taking only calls expected to beat the cost
+  dashboard/track.ts    what Jev's earlier calls caught, which is what its calls are judged worth by
   dashboard/web/        the page itself: TypeScript, hand-drawn charts, no framework and no build step
 test/                   the tests, and stand-ins for the model, prices, and clock (see testing.md)
 research/               plain Python and Node scripts that refit the order-book model (see accuracy.md)

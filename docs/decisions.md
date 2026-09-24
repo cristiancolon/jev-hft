@@ -473,6 +473,10 @@ any error. The process id makes that impossible.
 
 ## D48. The dashboard's profit and loss follows a rule you could have followed
 
+*Trading every lean was changed by D59: a call is now traded only when its track record says it
+will pay for itself. Entering at the mid when the answer arrived, and counting unmoved trades
+apart, still stand; the fee is D55.*
+
 **Chosen:** every answer with a lean is traded, all the same size, entering at the mid price when
 the answer arrived and closing at the horizon. Trading costs nothing unless `FEE_BPS` says
 otherwise, and trades where the price finished exactly where it started are counted apart from
@@ -749,3 +753,38 @@ connection: a book that breaks on one never resets the other.
 September 2026, so a $10,000 order is a noticeable share of a day's trading there. It is useful
 for what its quotes say, much less as a place to trade size.
 
+## D59. Jev's cards trade a call only when its track record beats the cost
+
+**Chosen:** the dashboard's Jev cards, like the order-book card, trade a call only when it is
+expected to catch more than the round trip costs (the fee on both fills and the spread). Jev
+doesn't say how far the price will move, so the expectation comes from its track record
+(`src/dashboard/track.ts`): the average of what earlier calls of about the same strength caught,
+less two standard errors. Only calls that had finished before the new one was made count, from
+the last four hours. Strength is the call's conviction (`src/model/lean.ts`), in bands split at
+a half, one and two ordinary leans, and a band needs 50 finished calls before it says anything.
+Each rule keeps its own record, so the selective card is judged by the calls the book agreed
+with. What every call would have made, traded whatever it cost, is still worked out and shown
+beside it. After a restart the dashboard reads back about six hours of records, so the record
+is as long as if it had never stopped.
+
+**Why:** with the fee charged (D55), trading every call guaranteed a loss: about 3,000 trades an
+hour, each catching 0.2 to 0.5 bp against a 10 bp round trip, for some −$29,000 an hour at
+$10,000 a trade. That read as the pipeline failing when the calls were as right as ever. The rule
+was what was wrong: nobody places a trade they expect to lose on. The order-book card already
+weighed each call against its cost, and now Jev's cards do too.
+
+A track record is used because nothing else turns Jev's answer into basis points: its answer is
+a set of probabilities for up, flat and down, and its lean is read against its usual one (D50).
+The bands are there because stronger leans caught more on every day measured: at 10 s, from 0.04
+bp for the weakest band to 0.32 bp for the strongest, over 77 hours of the Pi's calls. The margin
+is there because a band's average over a few hours swings with the market. It counts calls that
+share an outcome once, because calls a second apart share most of the same move: sixty 60 s calls
+in a row are barely more evidence than one. Over the same 77 hours, a one-hour record without the
+margin took thousands of 60 s trades at a quarter of a basis point a fill, and lost on them. With
+the margin and four hours, it took none at half a basis point a fill or more, and the few it took
+at a quarter lost on average. At no fee at all it still trades most 2 and 10 s calls, which made
++0.12 to +0.24 bp each, so it is not simply refusing everything.
+
+**When to rethink:** if fees ever fall to where some calls clear the bar, the four-hour window and
+the two-standard-error margin decide how many. Both were chosen on the same 77 hours they are
+described with here, so check them on new days first.

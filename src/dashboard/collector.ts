@@ -80,21 +80,38 @@ export type Pnl = {
   feeBpsPerSide: number;
   notionalUsd: number;
   legs: PnlLeg[];
+  /** How near the rule came to trading, per horizon. A dashboard server from before D59 sends none. */
+  reach: Reach[];
 };
 /**
- * `asAnswered`: every lean is traded at face value, all the same size. `corrected`: the same, with
- * Jev's usual lean taken out first. `selective`: the corrected lean, but only when the best level
- * of the order book agrees and no very recent headline disagrees, staking more on a stronger lean.
- * `orderBook`: the order-book model's call, only when the move it expects beats the cost of the
- * round trip, and at 10 s only in a calm market (docs/dashboard.md).
+ * `asAnswered`: Jev's answers at face value, all the same size. `corrected`: the same, with Jev's
+ * usual lean taken out first. `selective`: the corrected lean, but only when the best level of the
+ * order book agrees and no very recent headline disagrees, staking more on a stronger lean.
+ * `orderBook`: the order-book model's call, at 10 s only in a calm market. Each takes a call only
+ * when it is expected to catch more than the round trip costs (docs/dashboard.md).
  */
-export type PnlSet = { asAnswered: Pnl; corrected: Pnl; selective: Pnl; orderBook: Pnl; orderBookReach: OrderBookReach[] };
+export type PnlSet = { asAnswered: Pnl; corrected: Pnl; selective: Pnl; orderBook: Pnl };
 /**
- * How near the order-book rule came to trading at one horizon: calls it made, how many came in a
- * calm enough market, the biggest move it expected among those, and what a round trip cost on
- * average then. When it takes no trades, this is why.
+ * How near a rule came to trading at one horizon; when it takes no trades, this is why. First,
+ * every call it made whose outcome is known, as if each had been traded whatever it cost: how many,
+ * how many went each way, what the moves were worth, what trading them would have cost, and the
+ * stakes put down (the same measures as PnlLeg's). Then the calls it could weigh against the cost
+ * (for Jev, those with enough earlier calls like them to judge by; for the order-book model, those
+ * in a calm enough market), the most any of them was expected to catch, and what a round trip cost
+ * on average among them.
  */
-export type OrderBookReach = { horizonS: number; calls: number; calm: number; largestBps: number | null; meanCostBps: number | null };
+export type Reach = {
+  horizonS: number;
+  calls: number;
+  right: number;
+  wrong: number;
+  grossBps: number;
+  costBps: number;
+  staked: number;
+  weighed: number;
+  largestBps: number | null;
+  meanCostBps: number | null;
+};
 export type PnlUpdate = { type: 'pnl'; program: 'live'; pnl: PnlSet };
 
 /** A headline from before the dashboard started, restored from what the pipeline saved to disk. */
