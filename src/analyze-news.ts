@@ -46,6 +46,8 @@ const label = (h: number) => (h < 60 ? `${h}s` : `${h / 60}m`);
 // A stock move is only real if there was a usable quote at both ends (src/news/moves.ts).
 const entryOk = (r: NewsRecord) => entryOkAt(r, maxSpread);
 const move = (r: NewsRecord, h: number) => tradableMove(r, h, maxSpread);
+/** A round trip pays the fee on both fills and crosses the spread, taken as it was when the answer arrived. */
+const roundTrip = (r: NewsRecord) => 2 * config.feeBpsPerSide + (Number.isFinite(num(r.spreadBps)) ? num(r.spreadBps) : 0);
 
 const bySource = new Map<string, number>();
 for (const r of recs) bySource.set(r.item.source, (bySource.get(r.item.source) ?? 0) + 1);
@@ -133,14 +135,14 @@ function report(name: string, recs: NewsRecord[]) {
 
   // ---- 3. direction ----------------------------------------------------------------
   console.log(`[${name}] DIRECTION (relevant items)    signal = P(relevant) x (P(bullish) - P(bearish)) vs signed move`);
-  console.log(`  horizon     n   events      IC      t   hit%   net edge bp (cost ${config.feeBps}bp)`);
+  console.log(`  horizon     n   events      IC      t   hit%   net edge bp (after ${config.feeBpsPerSide}bp a fill, twice, and the spread)`);
   for (const h of horizons) {
     const rows = relevant.map(r => [r, r.signal, move(r, h)] as const).filter(([, s, m]) => Number.isFinite(m) && s !== 0);
     const ic = spearman(rows.map(p => p[1]), rows.map(p => p[2]));
     const events = independentEvents(rows.map(p => p[0]), h);
     const decided = rows.filter(([, , m]) => m !== 0);
     const hits = decided.filter(([, s, m]) => Math.sign(s) === Math.sign(m));
-    const edge = mean(rows.map(([, s, m]) => Math.sign(s) * m)) - config.feeBps;
+    const edge = mean(rows.map(([r, s, m]) => Math.sign(s) * m - roundTrip(r)));
     console.log(
       `  ${pad(label(h), 7)}  ${pad(rows.length, 4)}  ${pad(events, 7)}  ${pad(fmt(ic, 3), 6)}  ${pad(fmt(tStat(ic, events), 1), 5)}  ${pad(fmt((hits.length / decided.length) * 100, 0), 5)}  ${pad(fmt(edge, 2), 12)}`,
     );

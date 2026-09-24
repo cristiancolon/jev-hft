@@ -1,5 +1,12 @@
 # Handoff: improving 10 s and 60 s direction accuracy
 
+> **Done, 2026-09-23.** The work this note set up is written up in [accuracy.md](accuracy.md),
+> and its results are in the pipeline (decisions D54 to D57). The note is kept as it was for its
+> history. Two things in it have changed: the Pi is now reached at its Tailscale address,
+> `100.64.35.57` (the home-network address below no longer answered), and costs are no longer out
+> of scope. `research/accuracy.py` still works, but `research/extract.ts` and `research/fit.py`
+> replaced it for this question.
+
 Written 2026-09-23 for a new session to pick up. Nothing here has changed the pipeline's
 behaviour yet. What exists is a data pull, an analysis script, and a first set of findings.
 

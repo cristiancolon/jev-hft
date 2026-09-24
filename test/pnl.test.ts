@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { pnlReport } from '../src/dashboard/pnl.ts';
 import type { DecisionRecord } from '../src/engine.ts';
+import type { RidgeModel } from '../src/model/ridge.ts';
 import type { NewsRecord } from '../src/news/engine.ts';
 
 const T0 = 1_800_000_000_000;
-const OPTS = { feeBps: 0, notionalUsd: 10_000, product: 'BTC-USD' };
+const OPTS = { feeBpsPerSide: 0, notionalUsd: 10_000, product: 'BTC-USD' };
 
 type Extra = {
   /** Jev's usual lean before this answer. Left out, it is 0, so the corrected lean is the answer itself. */
@@ -45,11 +46,26 @@ function newsRecord(over: Partial<NewsRecord> = {}): NewsRecord {
   };
 }
 
-const leg = (rule: 'asAnswered' | 'corrected' | 'selective') => (recs: DecisionRecord[], horizonS = 10, opts = OPTS, news: NewsRecord[] = []) =>
-  pnlReport(recs, opts, news)[rule].legs.find(l => l.horizonS === horizonS)!;
+/** Order-book models that only carry what the orderBook rule reads: the calm condition, on at 10 s and off at 60 s, as fitted. */
+const model = (horizonS: number, gate: boolean) => ({ horizonS, calm: { gate, vol60Below: 0.6, maxSpreadTicks: 1, tickUsd: 0.01 } }) as RidgeModel;
+const MODELS = [model(10, true), model(60, false)];
+
+const leg = (rule: 'asAnswered' | 'corrected' | 'selective' | 'orderBook') => (recs: DecisionRecord[], horizonS = 10, opts = OPTS, news: NewsRecord[] = []) =>
+  pnlReport(recs, opts, news, MODELS)[rule].legs.find(l => l.horizonS === horizonS)!;
 const asAnswered = leg('asAnswered');
 const corrected = leg('corrected');
 const selective = leg('selective');
+const orderBook = leg('orderBook');
+
+/** A decision on which the order-book model expected `expectedBp`, with this volatility and spread. At a price of 100, one cent is 1 bp. */
+function obDecision(i: number, moveBp: number, expectedBp: number, vol60 = 0.3, spreadUsd = 0.01): DecisionRecord {
+  const rec = decision(i, moveBp, 0);
+  rec.signals.ob_10s = expectedBp;
+  rec.signals.ob_60s = expectedBp;
+  rec.vol60 = vol60;
+  rec.quote = { bid: 100 - spreadUsd / 2, ask: 100 + spreadUsd / 2 };
+  return rec;
+}
 const near = (a: number, b: number, what?: string) => assert.ok(Math.abs(a - b) < 1e-9, what ?? `${a} is not ${b}`);
 
 // ---- every answer, one size: the mechanics all three rules share -------------------------------
@@ -80,14 +96,34 @@ test('a horizon whose price is not known yet is left out', () => {
   assert.equal(asAnswered([rec], 60).trades, 1, 'the horizons that did finish still count');
 });
 
-test('the cost is charged to both ends of every trade', () => {
+test('the fee is charged on both fills of every trade', () => {
   const recs = [decision(0, 4, 1), decision(1, 4, 1)];
   near(asAnswered(recs).totalBps, 8);
-  const charged = asAnswered(recs, 10, { ...OPTS, feeBps: 3 });
-  near(charged.totalBps, 2, 'two trades, three basis points each');
+  const charged = asAnswered(recs, 10, { ...OPTS, feeBpsPerSide: 1.5 });
+  near(charged.totalBps, 2, 'two trades, 1.5 bp on each of their four fills');
+  near(charged.grossBps, 8, 'what the moves alone were worth is kept');
+  near(charged.costBps, 6);
   assert.equal(charged.wins, 2, 'each one still finished above water');
-  assert.equal(asAnswered(recs, 10, { ...OPTS, feeBps: 5 }).wins, 0, 'a cost above the move sinks them');
-  assert.equal(asAnswered([decision(0, 0, 1)], 10, { ...OPTS, feeBps: 2 }).losses, 1, 'once there is a cost, going nowhere loses');
+  const sunk = asAnswered(recs, 10, { ...OPTS, feeBpsPerSide: 2.5 });
+  assert.equal(sunk.wins, 0, 'a cost above the move sinks them');
+  assert.equal(sunk.right, 2, 'though both calls still had the direction right');
+  assert.equal(asAnswered([decision(0, 0, 1)], 10, { ...OPTS, feeBpsPerSide: 1 }).losses, 1, 'once there is a cost, going nowhere loses');
+});
+
+test('the spread is charged too: as it stood when the answer arrived, else at the snapshot', () => {
+  const rec = decision(0, 4, 1);
+  rec.quote = { bid: 99.995, ask: 100.005 }; // 1 bp wide at the snapshot
+  near(asAnswered([rec]).totalBps, 3, 'a backtest has only the snapshot quote');
+  rec.quoteResp = { bid: 99.99, ask: 100.01 }; // 2 bp wide when the answer arrived
+  near(asAnswered([rec]).totalBps, 2);
+  near(asAnswered([rec], 10, { ...OPTS, feeBpsPerSide: 0.5 }).totalBps, 1, 'fees and spread add up');
+  near(asAnswered([decision(0, 4, 1)]).totalBps, 4, 'a record from before quotes were saved pays no spread');
+});
+
+test('"went your way" is the call itself; "wins" are the trades that paid for themselves', () => {
+  const l = asAnswered([decision(0, 1, 1), decision(1, 3, 1), decision(2, -2, 1), decision(3, 0, 1)], 10, { ...OPTS, feeBpsPerSide: 1 });
+  assert.deepEqual([l.right, l.wrong], [2, 1], 'the flat one is neither');
+  assert.deepEqual([l.wins, l.losses], [1, 3], 'only the 3 bp move beat the 2 bp round trip');
 });
 
 test('the worst dip is measured from the best point reached, not from the start', () => {
@@ -107,8 +143,9 @@ test('the curve is the running total, and stays small enough to send often', () 
 });
 
 test('nothing to report is reported as nothing, not as zero profit', () => {
-  const set = pnlReport([], OPTS);
-  for (const report of [set.asAnswered, set.corrected, set.selective]) {
+  const set = pnlReport([], OPTS, [], MODELS);
+  assert.deepEqual(set.orderBookReach.map(r => [r.calls, r.largestBps, r.meanCostBps]), [[0, null, null], [0, null, null], [0, null, null]]);
+  for (const report of [set.asAnswered, set.corrected, set.selective, set.orderBook]) {
     assert.equal(report.n, 0);
     assert.equal(report.since, null);
     assert.deepEqual(
@@ -246,4 +283,37 @@ test('selective: a headline about a different instrument has no say over this on
   const rec = decision(0, 5, 0.5);
   const news = [newsRecord({ tResp: rec.tState - 60_000, signal: -0.9, symbol: 'AAPL' })];
   assert.equal(selective([rec], 10, OPTS, news).trades, 1, 'a headline about AAPL says nothing about BTC-USD');
+});
+
+// ---- orderBook: the order-book model, traded only when it can pay for itself ---------------------
+
+test('orderBook: trades only a call whose expected move beats the whole round trip', () => {
+  const opts = { ...OPTS, feeBpsPerSide: 1 }; // 2 bp in fees, plus a one-cent spread: 3 bp a round trip
+  const l = orderBook([obDecision(0, 5, 3.5), obDecision(1, 5, 2.9), obDecision(2, -5, -4)], 10, opts);
+  assert.equal(l.trades, 2, 'the 2.9 bp expectation could not pay for a 3 bp round trip');
+  near(l.grossBps, 10);
+  near(l.costBps, 2 * 3, 'fees on both fills, and the spread');
+});
+
+test('orderBook: at 10 s it waits for a calm minute and a one-tick spread', () => {
+  const l = orderBook([obDecision(0, 5, 3), obDecision(1, 5, 3, 0.9), obDecision(2, 5, 3, 0.3, 0.02), obDecision(3, 5, 3, NaN)]);
+  assert.equal(l.trades, 1, 'too volatile, two ticks wide, and unknown volatility all sit out');
+});
+
+test('orderBook: at 60 s, where calm made no difference, it does not wait for it', () => {
+  assert.equal(orderBook([obDecision(0, 5, 8, 0.9, 0.05)], 60).trades, 1, 'volatile and five ticks wide, but 8 bp expected beats the 5 bp spread');
+});
+
+test('orderBook: says how close it came when it took nothing', () => {
+  const recs = [obDecision(0, 5, 0.4), obDecision(1, 5, -0.7), obDecision(2, 5, 3, 0.9), decision(3, 5, 1)];
+  const reach = pnlReport(recs, { ...OPTS, feeBpsPerSide: 5 }, [], MODELS).orderBookReach.find(r => r.horizonS === 10)!;
+  assert.equal(reach.calls, 3, 'the record without an order-book call is not counted');
+  assert.equal(reach.calm, 2);
+  near(reach.largestBps!, 0.7, 'the biggest expectation among calm calls, whichever way');
+  near(reach.meanCostBps!, 11, 'two 5 bp fees and a 1 bp spread');
+  assert.equal(orderBook(recs, 10, { ...OPTS, feeBpsPerSide: 5 }).trades, 0);
+});
+
+test('orderBook: a record from before the model existed is never traded', () => {
+  assert.equal(orderBook([decision(0, 5, 1)]).trades, 0);
 });

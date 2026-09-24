@@ -73,10 +73,15 @@ anything else. In our recorded data it was 0.05 to 0.1 bp at 1 second and 1 to 4
 seconds, while a round trip really costs somewhere around 10 bp. That's why this path can't be
 profitable at these horizons, however good the predictions.
 
-`FEE_BPS` is what the report charges per round trip, and it is 0 by default, so the figures show
-what the moves alone were worth. Set it to what you would actually pay to see what survives.
+A round trip is charged the exchange's fee twice (`FEE_BPS_PER_SIDE`, 5 bp by default,
+Coinbase's cheapest taker rate) plus the average spread of the decisions scored; the first line of
+the report says what that came to. Set `FEE_BPS_PER_SIDE=0` to see what the moves alone were
+worth.
 
-**3. How good each signal was,** for Jev and for the four simple rules, at each horizon:
+**3. How good each signal was,** for Jev, the four simple rules, and the order-book model
+(`ob_*`, [accuracy.md](accuracy.md)), at each horizon. The order-book model is scored twice, from
+the snapshot like the simple rules, and from when Jev's answer arrived, which is when the
+dashboard's profit and loss trades it:
 
 | Column | Plain meaning |
 |---|---|

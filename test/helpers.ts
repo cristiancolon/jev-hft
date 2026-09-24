@@ -3,7 +3,7 @@
 import type { Experimental_EvaluationModel as EvaluationModel } from 'ai';
 import type { Prices } from '../src/market/prices.ts';
 
-export type Step = 'ok' | 'rate-limit' | 'server-error' | 'bad-request';
+export type Step = 'ok' | 'rate-limit' | 'server-error' | 'bad-request' | 'out-of-credits';
 
 /**
  * A model that answers the same way every time, after playing out a script of failures.
@@ -23,6 +23,8 @@ export function scriptedModel(script: Step[] = [], route: 'gateway' | 'typesafe'
       if (step === 'rate-limit') throw Object.assign(new Error('rate limited'), { statusCode: 429 });
       if (step === 'server-error') throw Object.assign(new Error('upstream timed out'), { statusCode: 504 });
       if (step === 'bad-request') throw Object.assign(new Error('bad request'), { statusCode: 400 });
+      // What TypeSafe said for 27 hours on the Pi (2026-09-22 to 23).
+      if (step === 'out-of-credits') throw new Error('{"error_type":"billing_error","message":"Your organization has no available TypeSafe API credits."}');
       const answers = Object.fromEntries(
         Object.entries(questions).map(([id, q]) => {
           if (q.type === 'boolean') return [id, { type: 'boolean' as const, probability: 0.9 }];

@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { config } from './config.ts';
 import type { DecisionRecord } from './engine.ts';
 import { bps as bp, independentCount, mean, num, partialSpearman, spearman, summarize, tStat } from './lib/stats.ts';
+import { spreadBps } from './model/costs.ts';
 import { DIRECTIONS, type DirectionId } from './model/jev.ts';
 import { fillLeans } from './model/lean.ts';
 
@@ -42,7 +43,14 @@ if (builds.length > 1) console.log('  more than one build of Jev answered in thi
 const gaps = recs.slice(1).map((r, i) => r.tState - recs[i]!.tState);
 // Time actually covered: pauses longer than five minutes (rate limits, separate runs) are not counted.
 const coveredS = gaps.filter(g => g < 5 * 60_000).reduce((a, b) => a + b, 0) / 1000;
-console.log(`${fmt(coveredS / 60, 1)} min of decisions, median spacing ${fmt(summarize(gaps).p50 / 1000, 2)}s; round-trip cost hurdle ${config.feeBps}bp (FEE_BPS)`);
+// What a round trip costs: the fee on both fills, and the spread (the mean over decisions that saved their quotes).
+const spreads = recs.filter(r => r.quote).map(spreadBps);
+const meanSpread = spreads.length > 0 ? mean(spreads) : 0;
+const roundTrip = 2 * config.feeBpsPerSide + meanSpread;
+console.log(
+  `${fmt(coveredS / 60, 1)} min of decisions, median spacing ${fmt(summarize(gaps).p50 / 1000, 2)}s; a round trip costs ${fmt(roundTrip, 2)}bp: ` +
+    `${config.feeBpsPerSide}bp a fill, twice (FEE_BPS_PER_SIDE), and ${spreads.length > 0 ? `a mean spread of ${fmt(meanSpread, 3)}bp` : 'no spread (these records saved no quotes)'}`,
+);
 const costs = recs.map(r => num(r.costUsd)).filter(Number.isFinite); // older records have none
 const cost = costs.reduce((a, b) => a + b, 0);
 const tokens = summarize(recs.map(r => num(r.inputTokens)).filter(Number.isFinite));
@@ -82,8 +90,8 @@ function score(signal: number[], ret: number[], horizonS: number): Score {
   const k = Math.max(1, Math.floor(n / 5));
   const meanRet = (xs: typeof sorted) => xs.reduce((a, p) => a + p[1], 0) / xs.length;
   const spread = meanRet(sorted.slice(n - k)) - meanRet(sorted.slice(0, k));
-  // Long the top quintile, short the bottom, hold for the horizon: average return per trade.
-  const edge = spread / 2 - config.feeBps;
+  // Long the top quintile, short the bottom, hold for the horizon: average return per trade, after costs.
+  const edge = spread / 2 - roundTrip;
   return { n, nInd, ic, t: tStat(ic, nInd), hit, spread, edge };
 }
 
@@ -98,17 +106,24 @@ console.log('  n = decisions; ind = decisions far enough apart (max(horizon, 5s)
 console.log('  jev_* scored from when the answer arrived (tradable); @state = from the snapshot (information only)');
 console.log('  jevc_* = the same answer with Jev\'s usual lean taken out: the ranking barely changes, which way it points does (hit%)');
 console.log('  baselines are computed in microseconds, so they are scored from the snapshot');
+console.log('  ob_* = the order-book model (src/model/ridge.ts), its expected move in bp; net edge charges every trade a full round trip');
 console.log('  horizon  signal            n    ind      IC      t   hit%  Q5-Q1bp  net edge bp');
 for (const h of config.horizons) {
   const retResp = recs.map(r => bp(r.fwdResp[h], r.midResp));
   const retState = recs.map(r => bp(r.fwdState[h], r.midState));
   const oracle = mean(retState.map(Math.abs));
-  console.log(`  ${pad(h + 's', 7)}  perfect foresight: mean |move| ${fmt(oracle, 2)}bp vs ${config.feeBps}bp cost`);
+  console.log(`  ${pad(h + 's', 7)}  perfect foresight: mean |move| ${fmt(oracle, 2)}bp vs ${fmt(roundTrip, 2)}bp a round trip`);
   const lines: [string, Score][] = [];
   for (const name of jevNames) lines.push([name, score(recs.map(r => num(r.signals[name])), retResp, h)]);
   if (jevFor[h]) lines.push([corrected(jevFor[h]!), score(recs.map(r => num(r.signals[corrected(jevFor[h]!)])), retResp, h)]);
   if (jevFor[h]) lines.push([`${jevFor[h]} @state`, score(recs.map(r => num(r.signals[jevFor[h]!])), retState, h)]);
   for (const name of baselines) lines.push([name, score(recs.map(r => num(r.signals[name])), retState, h)]);
+  // The order-book model: from the snapshot like the other rules, and from when Jev's answer
+  // arrived, which is when the dashboard's profit and loss trades it.
+  if (recs.some(r => Number.isFinite(num(r.signals[`ob_${h}s`])))) {
+    lines.push([`ob_${h}s`, score(recs.map(r => num(r.signals[`ob_${h}s`])), retState, h)]);
+    lines.push([`ob_${h}s @resp`, score(recs.map(r => num(r.signals[`ob_${h}s`])), retResp, h)]);
+  }
   for (const [name, s] of lines) {
     console.log(
       `  ${pad(h + 's', 7)}  ${name.padEnd(15)} ${pad(s.n, 5)}  ${pad(s.nInd, 5)}  ${pad(fmt(s.ic, 3), 6)}  ${pad(fmt(s.t, 1), 5)}  ${pad(fmt(s.hit * 100, 0), 4)}  ${pad(fmt(s.spread, 2), 7)}  ${pad(fmt(s.edge, 2), 11)}`,

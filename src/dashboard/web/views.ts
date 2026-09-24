@@ -1,7 +1,7 @@
 // Turns the dashboard's state into what is on the page. Each function owns one card, touches
 // the page only where something changed, and can be called as often as you like.
 
-import { actedLean, type DashboardState, type Decision, type NewsEntry, type Pnl, type Scoreboard } from '../collector.ts';
+import { actedLean, type DashboardState, type Decision, type NewsEntry, type OrderBookReach, type Pnl, type Scoreboard } from '../collector.ts';
 import * as f from './format.ts';
 
 export const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -239,33 +239,59 @@ export function renderLatency(state: DashboardState) {
 /** Money with the sign in front, so a loss reads as −$1.20 rather than $-1.20. */
 const usdSigned = (x: number) => `${x > 0 ? '+' : x < 0 ? '\u2212' : ''}$${Math.abs(x).toFixed(2)}`;
 
+/** What each card's rule is, in a sentence or two, shown under its numbers. */
+const PNL_RULES: Record<PnlCard, (horizonS: number) => string> = {
+  pnl: h =>
+    `Every answer with a lean is traded, all the same size: take Jev's side at the mid price the moment the answer arrived, close ${h} seconds later. Jev's side is its answer read against what it has usually been saying over the last 15 minutes, because at face value it leans “down” most of the time whatever the market does next. “At face value” is what the same rule made without that correction.`,
+  fpnl: () =>
+    `The same calls, but only when the best level of the order book points the same way: when the two disagreed, Jev was right less than half the time. It also sits out if a headline from the last 15 minutes leans the other way. What is left is staked by how strong the lean is next to Jev's ordinary one, up to twice the normal stake.`,
+  opnl: h =>
+    `No Jev here: the order-book model (six measurements of the book, fitted on earlier days) says how far it expects the price to move in the next ${h} s, and a call is traded only when that is more than the round trip costs${h === 10 ? ', and only when the last minute was calm and the spread was one tick, where the model was right most often' : ''}. It is scored from the moment Jev's answer arrived, like the other two.`,
+};
+
+type PnlCard = 'pnl' | 'fpnl' | 'opnl';
+
+/** What a round trip is charged, in words. */
+const costWords = (pnl: Pnl) => (pnl.feeBpsPerSide === 0 ? 'no fees, only the spread' : `${f.fixed(pnl.feeBpsPerSide, 1)} bp a fill, twice, and the spread`);
+
 /**
  * What one of the trading rules would have made at the chosen horizon. `prefix` selects which
- * card's elements to fill in, so the same code drives both. `faceValue` is the plain rule with
- * Jev's answers taken as they came, shown on the first card as the yardstick for the correction.
+ * card's elements to fill in, so the same code drives all three. `faceValue` is the plain rule
+ * with Jev's answers taken as they came, shown on the first card as the yardstick for the
+ * correction. `reach` says how close the order-book rule came to trading, for its card.
  */
-export function renderPnl(prefix: 'pnl' | 'fpnl', pnl: Pnl | null, horizonS: number, faceValue: Pnl | null = null) {
+export function renderPnl(prefix: PnlCard, pnl: Pnl | null, horizonS: number, faceValue: Pnl | null = null, reach: OrderBookReach[] = []) {
   const id = (suffix: string) => $(`${prefix}-${suffix}`);
   const leg = pnl?.legs.find(l => l.horizonS === horizonS);
   const total = id('money');
-  setText(id('sub'), pnl && pnl.n > 0 ? `${f.int(pnl.n)} finished decisions \u00b7 held ${horizonS} s each` : '');
+  setText(id('sub'), pnl && pnl.n > 0 ? `${f.int(pnl.n)} finished decisions · held ${horizonS} s each` : '');
   if (prefix === 'pnl') {
     // The same rule on the same decisions, without the correction: is reading Jev against its usual lean still paying?
     const was = faceValue?.legs.find(l => l.horizonS === horizonS);
-    const judged = was ? was.wins + was.losses : 0;
-    setText(id('face'), was && was.trades > 0 ? `${f.bp(was.totalBps)}${judged > 0 ? ` \u00b7 ${f.pct(was.wins / judged)} your way` : ''}` : '\u2014');
+    const judged = was ? was.right + was.wrong : 0;
+    setText(id('face'), was && was.trades > 0 ? `${f.bp(was.totalBps)}${judged > 0 ? ` · ${f.pct(was.right / judged)} your way` : ''}` : '—');
   }
+  const near = reach.find(r => r.horizonS === horizonS);
+  // Why the order-book rule did or did not trade: its best expectation next to the cost.
+  const why =
+    prefix === 'opnl' && near && near.calls > 0
+      ? `Of ${f.int(near.calls)} calls, ${f.int(near.calm)} came ${horizonS === 10 ? 'in a calm enough market' : 'with a price to trade'}; the biggest move the model expected among them was ${near.largestBps === null ? '—' : `${f.fixed(near.largestBps, 2)} bp`}, against a round trip of ${near.meanCostBps === null ? '—' : `${f.fixed(near.meanCostBps, 2)} bp`}.`
+      : '';
   if (!pnl || !leg || leg.trades === 0) {
     total.className = 'pnl-money';
-    setText(total, '\u2014');
-    setText(id('bps'), '\u00a0');
-    setText(id('stake'), '');
-    for (const suffix of ['trades', 'win', 'flat', 'avg', 'best', 'worst', 'dd']) setText(id(suffix), '\u2014');
+    setText(total, '—');
+    setText(id('bps'), ' ');
+    setText(id('stake'), pnl ? `a round trip: ${costWords(pnl)}` : '');
+    for (const suffix of ['trades', 'win', 'flat', 'avg', 'best', 'worst', 'dd', 'gross', 'cost']) setText(id(suffix), '—');
     setHtml(
       id('note'),
       prefix === 'pnl'
         ? `A trade only counts once the price ${horizonS} seconds after the answer is known, so this fills in about a minute behind the decisions themselves. A new run also spends its first minute learning Jev's usual lean, and makes no calls until it has.`
-        : `Fills in the same way, once there have been enough calls that also clear its filters below.`,
+        : prefix === 'fpnl'
+          ? `Fills in the same way, once there have been enough calls that also clear its filters below.`
+          : reach.some(r => r.calls > 0) && !near?.calls
+            ? `The order-book model has no ${horizonS} s version: the research behind it looked at 10 and 60 seconds only (docs/accuracy.md).`
+            : `${why || 'Fills in once the pipeline is sending the order-book model’s calls.'} No trade is the expected result at any fee Coinbase publishes: the model’s best calls expect well under a basis point, and a taker round trip costs at least 10 (docs/accuracy.md). Set FEE_BPS_PER_SIDE=0 to see what it would do with no fees.`,
     );
     return;
   }
@@ -273,30 +299,29 @@ export function renderPnl(prefix: 'pnl' | 'fpnl', pnl: Pnl | null, horizonS: num
   const dollars = (leg.totalBps / 10_000) * pnl.notionalUsd;
   total.className = `pnl-money ${leg.totalBps > 0 ? 'up' : leg.totalBps < 0 ? 'down' : ''}`;
   setText(total, usdSigned(dollars));
-  setText(id('bps'), `${f.bp(leg.totalBps)} in all`);
+  setText(id('bps'), `${f.bp(leg.totalBps)} in all, after costs`);
   const averageStake = leg.trades > 0 ? (leg.staked / leg.trades) * pnl.notionalUsd : pnl.notionalUsd;
   setHtml(
     id('stake'),
-    `${prefix === 'fpnl' ? `$${f.int(pnl.notionalUsd)} on an ordinary lean<br>$${f.int(averageStake)} a trade on average` : `$${f.int(pnl.notionalUsd)} a trade`}<br>${pnl.feeBps === 0 ? 'no trading costs' : `${f.fixed(pnl.feeBps, 1)} bp cost a trade`}`,
+    `${prefix === 'fpnl' ? `$${f.int(pnl.notionalUsd)} on an ordinary lean<br>$${f.int(averageStake)} a trade on average` : `$${f.int(pnl.notionalUsd)} a trade`}<br>a round trip: ${costWords(pnl)}`,
   );
-  const decided = leg.wins + leg.losses;
+  const called = leg.right + leg.wrong;
   setText(id('trades'), f.int(leg.trades));
-  setText(id('win'), decided > 0 ? f.pct(leg.wins / decided) : '\u2014');
-  setText(id('flat'), f.int(leg.trades - decided));
+  setText(id('win'), called > 0 ? f.pct(leg.right / called) : '—');
+  setText(id('flat'), f.int(leg.trades - called));
   setText(id('avg'), f.bp(leg.avgBps, 2));
   setText(id('best'), f.bp(leg.bestBps));
   setText(id('worst'), f.bp(leg.worstBps));
   setText(id('dd'), f.bp(-leg.maxDrawdownBps));
+  setText(id('gross'), f.bp(leg.grossBps));
+  setText(id('cost'), f.bp(-leg.costBps));
 
-  const rule =
-    prefix === 'pnl'
-      ? `Every answer with a lean is traded, all the same size: take Jev's side at the mid price the moment the answer arrived, close ${horizonS} seconds later. Jev's side is its answer read against what it has usually been saying over the last 15 minutes, because at face value it leans \u201cdown\u201d most of the time whatever the market does next. \u201cAt face value\u201d is what the same rule made without that correction.`
-      : `The same calls, but only when the best level of the order book points the same way: when the two disagreed, Jev was right less than half the time. It also sits out if a headline from the last 15 minutes leans the other way. What is left is staked by how strong the lean is next to Jev's ordinary one, up to twice the normal stake.`;
+  const paid = leg.wins + leg.losses;
   setHtml(
     id('note'),
-    `${rule} Trades overlap, so this assumes you could hold several at once.<br>
-     \u201cWent your way\u201d is a share of the ${f.int(decided)} trades where the price actually moved: over ${horizonS} s it often does not move at all, and those made nothing either way.<br>
-     Prices are mid-to-mid${pnl.feeBps === 0 ? ', with nothing charged for trading, so the gap between the buying and the selling price is not counted \u2014 set FEE_BPS to charge for it' : `, with ${f.fixed(pnl.feeBps, 1)} bp charged per round trip`}.`,
+    `${PNL_RULES[prefix](horizonS)} Trades overlap, so this assumes you could hold several at once.${why ? `<br>${why}` : ''}<br>
+     “Went your way” is a share of the ${f.int(called)} trades where the price actually moved, before any cost: over ${horizonS} s it often does not move at all. ${paid > 0 ? `After costs, ${f.pct(leg.wins / paid)} of trades made money.` : ''}<br>
+     Prices are mid-to-mid, and every trade is charged ${costWords(pnl)} (FEE_BPS_PER_SIDE); “before costs” is what the moves alone were worth.`,
   );
 }
 

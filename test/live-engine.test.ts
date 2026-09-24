@@ -71,6 +71,11 @@ test('a decision is recorded with what was asked, what was answered, simple rule
   assert.equal(r.costUsd, 0.000025);
   assert.equal(r.providerMs, 120);
   assert.match(r.state, /^BTC-USD \d\d:\d\d UTC mid 100\.00/);
+  // What trading it would have cost, and what the order-book model expected (src/model/ridge.ts).
+  assert.deepEqual(r.quote, { bid: 99.5, ask: 100.5 });
+  assert.deepEqual(r.quoteResp, { bid: 99.5, ask: 100.5 }, 'nothing moved while Jev answered');
+  assert.ok(Number.isFinite(r.signals.ob_10s) && Number.isFinite(r.signals.ob_60s));
+  assert.ok('vol60' in r, 'volatility is saved (unknown this early, so NaN)');
 });
 
 test("each answer is read against the ones before it, once there are enough of them", async () => {
@@ -123,6 +128,25 @@ test('after a rate-limit refusal the loop pauses instead of hammering', async ()
   assert.equal(s.calls.length, 1);
   assert.equal(s.engine.stats.rateLimited, 1);
   assert.match(s.logs.join('\n'), /pausing decisions 5s/);
+});
+
+test('out of credits, the loop waits minutes before asking again, not a second', async () => {
+  Object.assign(config, { warmupMs: 0, minIntervalMs: 0 });
+  const s = setup(['out-of-credits']);
+  const t = nowMs();
+  s.engine.onEvent(book(t, 100, true));
+  await settle();
+  for (const later of [1000, 30_000, 59_000]) {
+    s.engine.onEvent(book(t + later, 100));
+    await settle();
+  }
+  assert.equal(s.calls.length, 1, 'no second call within the first minute');
+  assert.equal(s.engine.stats.outOfCredits, 1);
+  assert.equal(s.engine.stats.errors, 0, 'counted apart from other errors');
+  assert.match(s.logs.join('\n'), /out of credits; asking again in 1 min/);
+  s.engine.onEvent(book(t + 61_000, 100));
+  await settle();
+  assert.equal(s.calls.length, 2, 'asks again once the pause is over');
 });
 
 test('a broken feed stops decisions until the book is rebuilt and warmed up again', async () => {

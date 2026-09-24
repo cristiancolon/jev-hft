@@ -89,6 +89,9 @@ export function scoreboard(recs: DecisionRecord[]): Scoreboard {
       { key: 'jevc', label: 'Jev, usual lean taken out', isJev: true, cells: horizons.map(h => cell(h, signal(`jevc_${h}s`), fromResp(h))) },
       { key: 'jev', label: 'Jev, as answered', isJev: false, cells: horizons.map(h => cell(h, signal(`jev_${h}s`), fromResp(h))) },
       ...RULES.map(([key, label]) => ({ key, label, isJev: false, cells: horizons.map(h => cell(h, signal(key), fromState(h))) })),
+      // The order-book model takes microseconds too, so it is scored like the simple rules. It has
+      // no 2 s model, so that cell stays empty.
+      { key: 'ob', label: 'Order-book model', isJev: false, cells: horizons.map(h => cell(h, signal(`ob_${h}s`), fromState(h))) },
     ],
     beyond: horizons.map(h => {
       const jev = signal(`jevc_${h}s`);

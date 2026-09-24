@@ -17,7 +17,7 @@ import { createInterface } from 'node:readline';
 import { PassThrough } from 'node:stream';
 import { createGunzip } from 'node:zlib';
 import { config, envNum } from './config.ts';
-import { answerFields, fillForward, type DecisionRecord } from './engine.ts';
+import { answerFields, bookFields, fillForward, type DecisionRecord } from './engine.ts';
 import type { MarketEvent } from './feed/types.ts';
 import { fileStamp } from './lib/run.ts';
 import { encode } from './market/encode.ts';
@@ -38,14 +38,15 @@ const TOKENS_PER_DECISION = 855;
 const USD_PER_TOKEN = 0.042 / 1e6;
 
 // 1. Replay and snapshot. Each snapshot sees only events received before its time.
-type Snapshot = { tState: number; f: Features; text: string; flat: FlatThresholds; buildMs: number };
+type Snapshot = { tState: number; f: Features; text: string; flat: FlatThresholds; buildMs: number; book: ReturnType<typeof bookFields> };
 const state = new MarketState(Infinity);
 let snaps: Snapshot[] = [];
 const feed = replayer(state, stepMs, config.warmupMs, t => {
   const t0 = performance.now();
   const f = state.features(t);
   const text = encode(f, state, config.product, config.encoding);
-  snaps.push({ tState: t, f, text, flat: flatThresholds(f.vol60, config.flatSigmas), buildMs: performance.now() - t0 });
+  const buildMs = performance.now() - t0; // what a live run spends before asking, so the order-book model is left out of it
+  snaps.push({ tState: t, f, text, flat: flatThresholds(f.vol60, config.flatSigmas), buildMs, book: bookFields(f, state) });
 });
 
 const input = createReadStream(file).pipe(file.endsWith('.gz') ? createGunzip() : new PassThrough());
@@ -105,6 +106,7 @@ async function worker() {
     for (let attempt = 0; ; attempt++) {
       try {
         const res = await answer(s);
+        const answered = answerFields(res, s.f, s.flat);
         const rec: DecisionRecord = {
           v: 2,
           mode: 'backtest',
@@ -115,7 +117,11 @@ async function worker() {
           modelMs: latencyMs,
           tResp: s.tState + latencyMs,
           state: s.text,
-          ...answerFields(res, s.f, s.flat),
+          ...answered,
+          // Only mids are kept for later times, so a backtest charges the spread at the snapshot.
+          signals: { ...answered.signals, ...s.book.signals },
+          quote: s.book.quote,
+          vol60: s.book.vol60,
           midState: s.f.mid,
           midResp: state.midAt(s.tState + latencyMs),
           fwdState: {},

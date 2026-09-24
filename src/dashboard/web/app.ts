@@ -16,6 +16,7 @@ const chart = new PriceChart(view.$<HTMLCanvasElement>('chart'));
 const latency = new LatencyChart(view.$<HTMLCanvasElement>('latency-chart'));
 const equity = new EquityChart(view.$<HTMLCanvasElement>('equity-chart'));
 const fequity = new EquityChart(view.$<HTMLCanvasElement>('fequity-chart'));
+const oequity = new EquityChart(view.$<HTMLCanvasElement>('oequity-chart'));
 /** The horizon the chart marks and the profit and loss is worked out for. */
 let horizonS = 10;
 view.buildHorizons();
@@ -129,8 +130,11 @@ function frame() {
       if (dirty.has('pnl')) {
         view.renderPnl('pnl', state.pnl?.corrected ?? null, horizonS, state.pnl?.asAnswered ?? null);
         view.renderPnl('fpnl', state.pnl?.selective ?? null, horizonS);
+        // A dashboard server from before the order-book rule existed sends no such card.
+        view.renderPnl('opnl', state.pnl?.orderBook ?? null, horizonS, null, state.pnl?.orderBookReach ?? []);
         equity.setData(state.pnl?.corrected.legs.find(l => l.horizonS === horizonS)?.curve ?? []);
         fequity.setData(state.pnl?.selective.legs.find(l => l.horizonS === horizonS)?.curve ?? []);
+        oequity.setData(state.pnl?.orderBook?.legs.find(l => l.horizonS === horizonS)?.curve ?? []);
       }
     }
     if (news) {

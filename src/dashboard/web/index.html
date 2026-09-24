@@ -128,12 +128,14 @@
             <div class="spark-wrap tall"><canvas id="equity-chart"></canvas></div>
             <dl class="stats compact">
               <div><dt>trades</dt><dd id="pnl-trades">—</dd></div>
-              <div title="Of the trades where the price moved at all"><dt>went your way</dt><dd id="pnl-win">—</dd></div>
+              <div title="Of the trades where the price moved at all, before any cost"><dt>went your way</dt><dd id="pnl-win">—</dd></div>
               <div title="Trades where the price was exactly where it started"><dt>no change</dt><dd id="pnl-flat">—</dd></div>
               <div><dt>average each</dt><dd id="pnl-avg">—</dd></div>
               <div><dt>best</dt><dd id="pnl-best">—</dd></div>
               <div><dt>worst</dt><dd id="pnl-worst">—</dd></div>
               <div title="The largest fall from a high point of the running total"><dt>worst dip</dt><dd id="pnl-dd">—</dd></div>
+              <div title="What the moves alone were worth, with nothing paid for trading"><dt>before costs</dt><dd id="pnl-gross">—</dd></div>
+              <div title="Fees on both fills and the spread, over every trade"><dt>costs</dt><dd id="pnl-cost">—</dd></div>
               <div class="span2" title="What the same rule made, and how often it went your way, with Jev's answers taken as they came instead of read against its usual lean"><dt>at face value, for comparison</dt><dd id="pnl-face">—</dd></div>
             </dl>
             <p class="footnote" id="pnl-note"></p>
@@ -154,14 +156,43 @@
             <div class="spark-wrap tall"><canvas id="fequity-chart"></canvas></div>
             <dl class="stats compact">
               <div><dt>trades</dt><dd id="fpnl-trades">—</dd></div>
-              <div title="Of the trades where the price moved at all"><dt>went your way</dt><dd id="fpnl-win">—</dd></div>
+              <div title="Of the trades where the price moved at all, before any cost"><dt>went your way</dt><dd id="fpnl-win">—</dd></div>
               <div title="Trades where the price was exactly where it started"><dt>no change</dt><dd id="fpnl-flat">—</dd></div>
               <div title="Made per normal stake put down, so betting smaller or larger does not change it"><dt>per stake</dt><dd id="fpnl-avg">—</dd></div>
               <div><dt>best</dt><dd id="fpnl-best">—</dd></div>
               <div><dt>worst</dt><dd id="fpnl-worst">—</dd></div>
               <div title="The largest fall from a high point of the running total"><dt>worst dip</dt><dd id="fpnl-dd">—</dd></div>
+              <div title="What the moves alone were worth, with nothing paid for trading"><dt>before costs</dt><dd id="fpnl-gross">—</dd></div>
+              <div title="Fees on both fills and the spread, over every trade"><dt>costs</dt><dd id="fpnl-cost">—</dd></div>
             </dl>
             <p class="footnote" id="fpnl-note"></p>
+          </article>
+
+          <article class="card pnl-card">
+            <header>
+              <h2>If you had traded the order-book model</h2>
+              <span class="muted" id="opnl-sub"></span>
+            </header>
+            <div class="pnl-head">
+              <div>
+                <div class="pnl-money" id="opnl-money">—</div>
+                <div class="pnl-bps" id="opnl-bps">&nbsp;</div>
+              </div>
+              <div class="pnl-stake" id="opnl-stake"></div>
+            </div>
+            <div class="spark-wrap tall"><canvas id="oequity-chart"></canvas></div>
+            <dl class="stats compact">
+              <div><dt>trades</dt><dd id="opnl-trades">—</dd></div>
+              <div title="Of the trades where the price moved at all, before any cost"><dt>went your way</dt><dd id="opnl-win">—</dd></div>
+              <div title="Trades where the price was exactly where it started"><dt>no change</dt><dd id="opnl-flat">—</dd></div>
+              <div><dt>average each</dt><dd id="opnl-avg">—</dd></div>
+              <div><dt>best</dt><dd id="opnl-best">—</dd></div>
+              <div><dt>worst</dt><dd id="opnl-worst">—</dd></div>
+              <div title="The largest fall from a high point of the running total"><dt>worst dip</dt><dd id="opnl-dd">—</dd></div>
+              <div title="What the moves alone were worth, with nothing paid for trading"><dt>before costs</dt><dd id="opnl-gross">—</dd></div>
+              <div title="Fees on both fills and the spread, over every trade"><dt>costs</dt><dd id="opnl-cost">—</dd></div>
+            </dl>
+            <p class="footnote" id="opnl-note"></p>
           </article>
 
           <article class="card live-only" id="decision-card">

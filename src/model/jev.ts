@@ -84,6 +84,16 @@ export function createModel(provider = process.env.JEV_PROVIDER || 'typesafe'): 
 export class RateLimitedError extends Error {}
 
 /**
+ * The account has run out of credits. Unlike a rate limit this does not clear in seconds, and
+ * asking once a second anyway is what filled the Pi's log with 91,729 identical failures over the
+ * 27 hours the credits were gone (2026-09-22 to 23). Callers pause for minutes instead.
+ */
+export function isOutOfCredits(error: unknown): boolean {
+  const e = error as { statusCode?: number; message?: string } | undefined;
+  return e?.statusCode === 402 || /billing_error|no available .*credits/i.test(e?.message ?? '');
+}
+
+/**
  * Did the call run out of time? The gateway provider wraps whatever went wrong in its own error
  * type, so the timeout we set may be one or two levels down in the chain of causes.
  */

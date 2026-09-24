@@ -66,6 +66,12 @@ check later whether Jev's judgments were right, and whether they arrived fast en
   very bullish, an exchange shutting withdrawals as very bearish, and a bakery accepting
   Bitcoin as irrelevant. Shown what had already been reported, it correctly marked a reworded
   repeat as not new. Whether its judgments are *profitable* needs real data collected over time.
+- **At 10 and 60 seconds, the order book beats Jev, and costs beat everything.** Tested on four
+  days the Pi recorded, with the last day kept locked until every choice was made, a small model
+  of the order book was right 56% of the time at 10 seconds (67% on its strongest calls in calm
+  markets), against 52% for Jev on the same seconds. At 60 seconds nothing beat a coin flip. And
+  no trade at either horizon pays for itself at any fee Coinbase publishes: the best calls catch
+  about 0.4 bp against a 10 bp round trip ([accuracy.md](accuracy.md)).
 - **Cost is small:** about three thousandths of a cent per decision. The news path costs cents a
   day; asking about the market once a second costs about $3 a day.
 
@@ -86,7 +92,8 @@ check later whether Jev's judgments were right, and whether they arrived fast en
 | [testing.md](testing.md) | What the tests protect, and how the engines are tested without the outside world. |
 | [operations.md](operations.md) | Running things, every setting, costs, fixing common problems, running on a Raspberry Pi. |
 | [decisions.md](decisions.md) | A numbered log of every major design decision: what we chose, why, and when to rethink it. |
-| [handoff-accuracy.md](handoff-accuracy.md) | Where the 10 s / 60 s accuracy work stands: the data, the first findings, and what to try next. |
+| [accuracy.md](accuracy.md) | How often the 10 s and 60 s calls are right, what trading costs, and why nothing survives it yet. How to refit the order-book model. |
+| [handoff-accuracy.md](handoff-accuracy.md) | The note the accuracy work started from (done; kept for its history). |
 
 ## Glossary
 
@@ -116,6 +123,8 @@ check later whether Jev's judgments were right, and whether they arrived fast en
 | **Decision** | One call to Jev and everything we record about it. |
 | **Horizon** | How far ahead we check the price after a decision, e.g. 10 seconds or 30 minutes. |
 | **Signal** | A number that says "up" (positive) or "down" (negative) and how strongly. |
+| **Order-book model** | A small formula, fitted on recorded days, that turns six measurements of the order book into the move it expects over the next 10 or 60 seconds. |
+| **Maker / taker fee** | What an exchange charges per fill: a taker (who trades against a waiting order) pays more than a maker (whose order was waiting). A round trip is two fills. |
 | **Baseline** | A simple rule, such as "more buyers than sellers waiting means up next", that Jev has to beat to be worth anything. |
 | **Information coefficient (IC)** | A score from −1 to +1 for how well a signal ranked outcomes: +1 means its strongest "up" calls always saw the biggest rises, 0 means no relationship. |
 | **Calibration** | Whether probabilities mean what they say: of all the times Jev says 70%, does it happen about 70% of the time? |
@@ -145,8 +154,12 @@ src/
   market/quotes.ts      price and spread history for each stock
   market/prices.ts      one way to ask "what did this cost at time t?" for Bitcoin and stocks alike
   market/sessions.ts    US market hours, in New York time
+  market/microstructure.ts  order-book measurements beyond Jev's text: the book's shape, and order and trade flow over time
   model/jev.ts          how we call Jev (either route), its connection, the market-data questions, and the mock model
   model/lean.ts         reading Jev's lean against what it usually says, which is what gets acted on
+  model/ridge.ts        the order-book model: its expected move at 10 and 60 s, and when the market is calm enough
+  model/weights/        the order-book model's fitted weights, committed so the Pi runs what was tested
+  model/costs.ts        what a round trip costs: the fee on both fills and the spread
   engine.ts             the live loop of the market-data path and its record format
   live.ts               runs the market-data path live
   record.ts             saves the Coinbase feed to disk (live.ts can do this too, with RECORD=1)
@@ -179,6 +192,7 @@ src/
   dashboard/outcomes.ts scores finished decisions: what happened next, Jev against the simple rules
   dashboard/web/        the page itself: TypeScript, hand-drawn charts, no framework and no build step
 test/                   the tests, and stand-ins for the model, prices, and clock (see testing.md)
+research/               plain Python and Node scripts that refit the order-book model (see accuracy.md)
 bench/latency.ts        measures Jev's response time on either route, side by side
 examples/triage.ts      the smallest possible Jev example
 deploy/pi/              Raspberry Pi setup script and background service (see deploy/pi/README.md)

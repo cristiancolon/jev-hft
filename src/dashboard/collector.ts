@@ -52,7 +52,14 @@ export type PnlLeg = {
   /** Trades that finished above and below water, after cost. Any left over neither made nor lost anything. */
   wins: number;
   losses: number;
+  /** Trades whose price went the way the call said, and the other way, before any cost: how often the call itself was right. */
+  right: number;
+  wrong: number;
+  /** After costs. */
   totalBps: number;
+  /** What the moves alone were worth, and what trading them cost (fees on both fills and the spread); totalBps is the difference. */
+  grossBps: number;
+  costBps: number;
   /** Normal stakes put down in all: the same as `trades` for a rule that always bets one, less or more for one that sizes its bets. */
   staked: number;
   /** Made per normal stake put down. */
@@ -69,18 +76,25 @@ export type Pnl = {
   /** Finished decisions it is based on, and the time of the oldest. */
   n: number;
   since: number | null;
-  /** The assumptions it was worked out under. */
-  feeBps: number;
+  /** The assumptions it was worked out under: the exchange's fee on each fill, in bps. */
+  feeBpsPerSide: number;
   notionalUsd: number;
   legs: PnlLeg[];
 };
 /**
  * `asAnswered`: every lean is traded at face value, all the same size. `corrected`: the same, with
  * Jev's usual lean taken out first. `selective`: the corrected lean, but only when the best level
- * of the order book agrees and no very recent headline disagrees, staking more on a stronger lean
- * (docs/dashboard.md).
+ * of the order book agrees and no very recent headline disagrees, staking more on a stronger lean.
+ * `orderBook`: the order-book model's call, only when the move it expects beats the cost of the
+ * round trip, and at 10 s only in a calm market (docs/dashboard.md).
  */
-export type PnlSet = { asAnswered: Pnl; corrected: Pnl; selective: Pnl };
+export type PnlSet = { asAnswered: Pnl; corrected: Pnl; selective: Pnl; orderBook: Pnl; orderBookReach: OrderBookReach[] };
+/**
+ * How near the order-book rule came to trading at one horizon: calls it made, how many came in a
+ * calm enough market, the biggest move it expected among those, and what a round trip cost on
+ * average then. When it takes no trades, this is why.
+ */
+export type OrderBookReach = { horizonS: number; calls: number; calm: number; largestBps: number | null; meanCostBps: number | null };
 export type PnlUpdate = { type: 'pnl'; program: 'live'; pnl: PnlSet };
 
 /** A headline from before the dashboard started, restored from what the pipeline saved to disk. */

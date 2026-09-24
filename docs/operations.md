@@ -16,6 +16,8 @@
 | `npm run example` | the smallest possible Jev call | printed |
 | `npm test` | runs the tests (about a second, no network or keys needed) | printed |
 | `npm run check` | type check, then the tests | printed |
+| `node research/extract.ts <recording>` | one row of order-book measurements a second, for refitting the order-book model ([accuracy.md](accuracy.md#refitting)) | `data/research/rows.f64` and `.json` |
+| `python3 research/fit.py data/research/rows` | fits and tests the 10 s and 60 s models, day by day; `--final --export src/model/weights` scores the locked day and writes new weights | printed |
 
 Every runner stops cleanly with Ctrl-C, when the system shuts it down, or after `RUN_MINUTES`.
 Try anything new with `JEV_PROVIDER=mock` first: it's free and has no rate limits.
@@ -55,7 +57,7 @@ program with a clear message.
 | `JEV_USD_PER_MTOK` | `0.042` | list price per million input tokens, used to work out what a call cost when the route doesn't say. The gateway reports its own figure and ignores this |
 | `MOCK_LATENCY_MS` | `375` | how long the mock takes to answer |
 | `RUN_MINUTES` | `0` | stop after this many minutes (0 means run until stopped) |
-| `FEE_BPS` | `0` | round-trip trading cost used by the reports and by the dashboard's profit and loss. Zero shows what the moves alone were worth; set it to what your broker charges to see what survives |
+| `FEE_BPS_PER_SIDE` | `5` | the exchange's fee on each fill, in bp, as its fee schedule quotes it (0.60% is 60). Every trade in the reports and the dashboard's profit and loss pays it twice, plus the spread. 5 is Coinbase's lowest published taker fee; 0 shows what the moves alone were worth. The old `FEE_BPS` (a round-trip figure) still works, read as half on each side |
 | `PNL_NOTIONAL_USD` | `10000` | the stake behind each trade in the dashboard's profit and loss |
 
 **Dashboard** ([dashboard.md](dashboard.md))
@@ -125,6 +127,10 @@ program with a clear message.
   default accounts it's usually cents. Profiles are looked up once per account, ever (6 cents for
   the defaults), and remembered in `data/cache/x-users.json`.
 - **Coinbase, the public news feeds, and the SEC:** free.
+- **Trading itself (not done here, only charged in the reports):** Coinbase charged 60 bp per fill
+  for takers at its smallest tier and 5 bp at its largest when this was written, and a round trip
+  pays it twice. At the cheapest of those, nothing at 10 or 60 seconds survives, even with perfect
+  foresight almost every time ([accuracy.md](accuracy.md#what-trading-costs)).
 
 ## Running on a Raspberry Pi
 
@@ -145,7 +151,8 @@ A few tips:
 - Use the 64-bit Raspberry Pi OS, and a network cable rather than Wi-Fi if you can. Wi-Fi is where
   connections most often die silently; the pipeline notices and reconnects within about 10
   seconds (Coinbase) or 40 seconds (Alpaca), but a cable avoids it.
-- If you'll also save market data around the clock (`--service record`, about 260 MB a day), use
+- If you'll also save market data around the clock (`--service record`, about 180 MB a day on the
+  Pi in September 2026), use
   an SSD rather than the SD card, since constant writing wears SD cards out.
 - A sudden power cut loses up to 30 minutes of pending news decisions; a normal stop or restart
   doesn't.
@@ -159,6 +166,7 @@ account without credits the two copies would share the same few calls.
 | What you see | Why | What to do |
 |---|---|---|
 | "Free tier requests on this model are rate-limited" / many `429s` | the gateway account has no credits | add gateway credits, or ask less often; the engines already slow down by themselves |
+| `out of credits; asking again in N min` / `no-credit` climbing in the status line | the TypeSafe account is empty | add credits (or turn on auto-reload) at TypeSafe; the engine checks again on its own, at most every 15 minutes, and carries on when they're back |
 | `Failed to load TypeSafe API key` | `TYPESAFE_AI_API_KEY` missing from `.env` | add it, or set `JEV_PROVIDER=gateway` to use the other route |
 | `GatewayAuthenticationError` | `AI_GATEWAY_API_KEY` missing from `.env`, or no longer valid | add it; if it was revoked, create a new one with `vercel ai-gateway api-keys create` |
 | `model call failed (...); trying again in 2s` | a timeout or a hiccup at the gateway | nothing; news items are tried up to three times |

@@ -54,6 +54,17 @@ function sources(spec: string | undefined): string[] {
   return list;
 }
 
+/**
+ * The fee per fill. FEE_BPS, the setting this replaced, was for a whole round trip; an old .env
+ * that still sets it keeps the same cost, read as half on each side. FEE_BPS_PER_SIDE wins if
+ * both are set.
+ */
+function feeBpsPerSide() {
+  const legacy = process.env.FEE_BPS?.trim();
+  if (process.env.FEE_BPS_PER_SIDE?.trim() || !legacy) return envNum('FEE_BPS_PER_SIDE', 5, { min: 0 });
+  return envNum('FEE_BPS', 0, { min: 0 }) / 2;
+}
+
 const alpacaFeed = process.env.ALPACA_FEED || 'iex';
 
 /** Official accounts followed on X by default: US economic agencies and market regulators, and Coinbase. */
@@ -88,12 +99,14 @@ export const config = {
   /** Forward-return horizons (seconds) recorded for every decision. */
   horizons: [1, 2, 5, 10, 30, 60],
   /**
-   * Round-trip trading cost (fees + half-spread x2), used as the hurdle in the report and
-   * charged to every trade in the dashboard's profit and loss. Zero by default, so both show
-   * what the moves alone were worth; set it to what you would really pay to see whether
-   * anything survives the cost of trading.
+   * What the exchange charges per fill, in bps, the way fee schedules quote it. A round trip pays
+   * it twice, plus the spread, and that is charged to every trade in the reports and the
+   * dashboard's profit and loss (src/model/costs.ts). The default is Coinbase Advanced Trade's
+   * lowest published taker fee (0.05%, its biggest-volume tier), the least a taker pays there;
+   * its smallest tier charged 0.60% (60) when this was written. 0 shows what the moves alone
+   * were worth.
    */
-  feeBps: envNum('FEE_BPS', 0, { min: 0 }),
+  feeBpsPerSide: feeBpsPerSide(),
 
   alpaca: {
     key: process.env.ALPACA_API_KEY_ID || '',

@@ -660,3 +660,70 @@ fails if any marker that is still on screen is dropped or swapped. The first ver
 passed against the old code, because its data was shorter than the window so nothing ever left
 it — the fixture was lengthened until the old rule failed on all 300 seconds it checks. A test
 for a sliding window has to actually slide.
+
+## D54. The 10 s and 60 s calls come from a small model of the order book, not from Jev
+
+**Chosen:** every decision now also records the expected move over 10 and 60 seconds from a
+linear fit on six measurements of the book (`ob_10s`, `ob_60s`, src/model/ridge.ts). Its
+weights are fitted offline by `research/fit.py` and committed in `src/model/weights/`, so the Pi
+runs exactly what was tested. Jev is still asked, and still scored.
+
+**Why:** over four days the Pi recorded, and on a day kept locked until every choice was made,
+the model was right 55.7% of the time at 10 seconds and 63.5% on its strongest tenth of calls.
+Jev, on the same kind of seconds, was right 52%, and adding it to the model changed nothing. The
+model also answers in about 10 µs, costs nothing, and says *how far* it expects the price to move,
+which a cost decision needs and a direction alone cannot give ([accuracy.md](accuracy.md)).
+
+**Why only six measurements, and a straight line:** 80 measurements (order flow, trade flow,
+momentum, time of day) did no better, and nor did boosted trees. A simpler model is easier to
+trust, to run on the Pi, and to check: the test suite holds the live code to the answers Python
+gave, to nine decimal places.
+
+**Why it is worked out after Jev's request is sent:** so it cannot delay Jev, and it only reads
+the book once per decision, so nothing is added to the handling of each market event.
+
+**When to rethink:** refit every few weeks, or when the scoreboard shows it slipping. If a feed
+from another exchange is added (the most likely source of a real 10 to 60 second signal), the
+fit should be rerun with it.
+
+## D55. Every trade pays two fees and the spread, and the fee is set per fill
+
+**Chosen:** the reports and the dashboard charge every trade `FEE_BPS_PER_SIDE` twice (once to
+open, once to close) plus the spread at the moment it would have been placed
+(src/model/costs.ts). The default is 5 bp, Coinbase's lowest published taker fee. It replaces
+`FEE_BPS`, a single round-trip number that defaulted to 0; an old `.env` that still sets
+`FEE_BPS` keeps the same cost, read as half on each side.
+
+**Why:** exchanges quote their fees per fill, so a per-fill setting is the one people fill in
+correctly. A default of zero made every card show what the moves were worth with nothing paid,
+which looked like profit and wasn't. At the cheapest taker fee there is, nothing at 10 or 60
+seconds survives, and the pipeline should say so without being asked. Each result also keeps
+what the moves alone were worth, so a right-but-too-small signal can still be told from a
+wrong one.
+
+**When to rethink:** set it to your own tier. If limit orders (maker fees, often 0) are ever
+simulated, they need their own cost model: a resting order is not always filled, and tends to be
+filled when the price is moving against it.
+
+## D56. Running out of credits pauses the engine for minutes
+
+**Chosen:** when TypeSafe says the account has no credits, the market-data engine waits a minute
+before asking again, then twice as long each time it is refused, up to 15 minutes. It counts these
+apart from other errors (`no-credit` in the status line).
+
+**Why:** from 2026-09-22 20:33 to 2026-09-23 23:24 UTC the account was empty, and the engine kept
+asking once a second: 91,729 identical failures in the Pi's log. A rate limit clears in seconds;
+an empty account doesn't, so there is nothing to gain from asking every second, and the log
+becomes hard to read. The first answer after credits return resets the wait.
+
+## D57. The 10 s rule waits for a calm market; the 60 s rule doesn't
+
+**Chosen:** the dashboard's order-book rule trades a 10 s call only when the last minute was calm
+(60-second volatility below the two-thirds mark of the training days, 0.64 bp) and the spread is
+one tick. The condition is written into each model's file, so it changes when the model is refit.
+
+**Why:** the model was right more often in those seconds on every test day: 57.5% against 53.2%
+in the other seconds on the earlier test days, and 58.2% against 55.7% for the day as a whole on
+the locked one (67% on its strongest tenth). With a spread wider than a tick the book said almost
+nothing. At 60 seconds the same condition made no
+difference, so it isn't applied there.

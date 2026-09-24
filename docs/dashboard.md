@@ -51,10 +51,13 @@ Everything the pipeline is doing, as it does it:
   every run since, whether it is still earning its place.
 
   Two things are worth keeping in mind when reading it. Trades overlap, so it assumes you could
-  hold several at once. And prices are mid-to-mid, so by default nothing is charged for trading
-  at all: `FEE_BPS` adds a cost per round trip, which is the honest way to find out whether
-  anything survives it. Over short horizons the price is often exactly where it started, and
-  those trades are counted separately rather than as losses.
+  hold several at once. And every trade pays what trading really costs: the exchange's fee on
+  both fills (`FEE_BPS_PER_SIDE`, 5 bp by default, Coinbase's cheapest taker rate) and the spread
+  it would have crossed. "Before costs" shows what the moves alone were worth and "costs" what
+  paying for them took, so a signal that is right but too small to trade can be told from one
+  that is wrong. "Went your way" is measured before costs, so it says how often the call itself
+  was right. Over short horizons the price is often exactly where it started, and those trades
+  are counted separately rather than as losses.
 - **If you had traded selectively:** the same calls under a more careful rule, right next to the
   first so the two can be compared. It trades only when the best level of the order book points
   the same way as Jev, because when the two disagreed Jev was right less than half the time. It
@@ -67,6 +70,18 @@ Everything the pipeline is doing, as it does it:
   right way about two times in three at 2 seconds. Jev's agreement adds a few points on top of
   that. Fresh, relevant news is often not available (most sources publish only a few times an
   hour), and when there is none the rule simply goes without it.
+- **If you had traded the order-book model:** no Jev at all. The order-book model
+  ([accuracy.md](accuracy.md)) says how far it expects the price to move, and this card takes a
+  call only when that is more than the round trip would cost, and at 10 seconds only when the last
+  minute was calm and the spread one tick, where the model was right most often. It is the only
+  card that looks at the cost before trading. At any fee Coinbase publishes it takes almost
+  nothing, because the model's best calls expect well under a basis point, so when it has no
+  trades it says how close it came: how many calls came in a calm market, the biggest move the
+  model expected, and what a round trip cost. That gap is the finding, not a fault. Set
+  `FEE_BPS_PER_SIDE=0` to see what it would do with no fees.
+
+The scoreboard has a row for the order-book model too, scored from the snapshot like the other
+simple rules, since it takes microseconds.
 
 **News** (when `npm run news` is running)
 
@@ -192,7 +207,7 @@ nothing at all while its tab is in the background.
 | `DASHBOARD_PORT` | `4000` | the page's port |
 | `TELEMETRY_PORT` | `4100` | the port the dashboard listens on for the pipeline's messages |
 | `DASHBOARD_HOST` | `127.0.0.1` | which network address to listen on. `0.0.0.0` makes the page reachable from other machines |
-| `FEE_BPS` | `0` | round-trip trading cost charged to every trade in the profit and loss |
+| `FEE_BPS_PER_SIDE` | `5` | the exchange's fee on each fill, in bp; every trade in the profit and loss pays it twice, plus the spread |
 | `PNL_NOTIONAL_USD` | `10000` | the stake behind each trade, so the total can be shown in money |
 
 ## Watching a Raspberry Pi

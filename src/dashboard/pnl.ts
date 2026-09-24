@@ -14,16 +14,28 @@
 // on a stronger lean. When Jev and the book disagreed, Jev was right less than half the time, so
 // its dissent is not worth acting on (docs/decisions.md D51).
 //
+// "orderBook" trades the order-book model (src/model/ridge.ts) instead of Jev. It is the only
+// rule that looks at the cost before trading: the model says how far it expects the price to
+// move, so a call is taken only when that is more than the round trip would cost, and at 10 s
+// only in the calm markets where the model was right most often (docs/accuracy.md). At any fee
+// Coinbase publishes that is almost never, which is the finding, not a fault.
+//
+// Every rule pays for every trade: the exchange's fee on the way in and on the way out, and the
+// spread (src/model/costs.ts). Each leg also keeps what the moves alone were worth, so a signal
+// that is right but too small to trade can be told from one that is simply wrong.
+//
 // No rule looks at how the run turned out before deciding what to trade, which is the difference
 // between this and the "net edge" in the report (src/analyze.ts): that one sorts the whole run
 // into quintiles to find its strongest signals, and you could only do that afterwards.
 
 import type { DecisionRecord } from '../engine.ts';
 import { bps, num } from '../lib/stats.ts';
+import { roundTripBps } from '../model/costs.ts';
 import { DIRECTIONS, type DirectionId } from '../model/jev.ts';
 import { conviction } from '../model/lean.ts';
+import { calmEnough, orderBookModels, type RidgeModel } from '../model/ridge.ts';
 import type { NewsRecord } from '../news/engine.ts';
-import type { Pnl, PnlLeg, PnlSet } from './collector.ts';
+import type { OrderBookReach, Pnl, PnlLeg, PnlSet } from './collector.ts';
 
 /** Points kept for drawing the running total: enough for a smooth line, small enough to send often. */
 const CURVE_POINTS = 240;
@@ -35,8 +47,8 @@ const NEWS_LOOKBACK_MS = 15 * 60_000;
 const NEWS_AGREEMENT_BOOST = 0.25;
 
 export type PnlOptions = {
-  /** Round-trip cost charged to every trade, in basis points. */
-  feeBps: number;
+  /** The exchange's fee on each fill, in bps; a round trip pays it twice, and the spread on top. */
+  feeBpsPerSide: number;
   /** Stake per trade at full size, so the result can be shown in money as well as basis points. */
   notionalUsd: number;
   /** The instrument being traded, so a headline about something else is never mistaken for a fundamental opinion. */
@@ -88,6 +100,38 @@ function selectiveDecision(rec: DecisionRecord, horizonS: number, news: readonly
   return { dir, sizeFraction };
 }
 
+/**
+ * The order-book model's call, taken only when the move it expects is bigger than what the
+ * round trip would cost, and, where its model says so, only in a calm market.
+ */
+function orderBookDecision(rec: DecisionRecord, horizonS: number, feeBpsPerSide: number, models: readonly RidgeModel[]): Decision {
+  const expected = rec.signals[`ob_${horizonS}s`];
+  const dir = direction(expected);
+  if (!dir) return null;
+  const model = models.find(m => m.horizonS === horizonS);
+  if (model && !calmEnough(model, rec.vol60, rec.quote ? rec.quote.ask - rec.quote.bid : undefined)) return null;
+  if (Math.abs(expected as number) <= roundTripBps(rec, feeBpsPerSide)) return null; // it would not pay for itself
+  return { dir, sizeFraction: 1 };
+}
+
+function orderBookReach(recs: DecisionRecord[], horizonS: number, feeBpsPerSide: number, models: readonly RidgeModel[]): OrderBookReach {
+  const model = models.find(m => m.horizonS === horizonS);
+  let calls = 0;
+  let calm = 0;
+  let largest: number | null = null;
+  let costs = 0;
+  for (const rec of recs) {
+    const expected = rec.signals[`ob_${horizonS}s`];
+    if (typeof expected !== 'number' || !Number.isFinite(expected)) continue;
+    calls++;
+    if (model && !calmEnough(model, rec.vol60, rec.quote ? rec.quote.ask - rec.quote.bid : undefined)) continue;
+    calm++;
+    largest = Math.max(largest ?? 0, Math.abs(expected));
+    costs += roundTripBps(rec, feeBpsPerSide);
+  }
+  return { horizonS, calls, calm, largestBps: largest, meanCostBps: calm > 0 ? costs / calm : null };
+}
+
 /** Evenly spaced points, keeping the first and the last. */
 function thin<T>(xs: T[], most: number): T[] {
   if (xs.length <= most) return xs;
@@ -95,14 +139,18 @@ function thin<T>(xs: T[], most: number): T[] {
   return Array.from({ length: most }, (_, i) => xs[Math.round(i * step)]!);
 }
 
-function leg(recs: DecisionRecord[], horizonS: number, feeBps: number, decide: (rec: DecisionRecord, horizonS: number) => Decision): PnlLeg {
+function leg(recs: DecisionRecord[], horizonS: number, feeBpsPerSide: number, decide: (rec: DecisionRecord, horizonS: number) => Decision): PnlLeg {
   const curve: { t: number; cumBps: number }[] = [];
   let total = 0;
+  let gross = 0;
+  let costs = 0;
   let staked = 0;
   let peak = 0;
   let drawdown = 0;
   let wins = 0;
   let losses = 0;
+  let right = 0;
+  let wrong = 0;
   let best: number | null = null;
   let worst: number | null = null;
 
@@ -112,9 +160,14 @@ function leg(recs: DecisionRecord[], horizonS: number, feeBps: number, decide: (
     const move = bps(rec.fwdResp[horizonS], rec.midResp);
     if (!Number.isFinite(move)) continue; // the horizon hasn't finished yet
     // Unweighted: what the call itself was worth, so "best"/"worst" describe the call, not the stake.
-    const gotBps = decision.dir * move - feeBps;
+    const cost = roundTripBps(rec, feeBpsPerSide);
+    const gotBps = decision.dir * move - cost;
+    gross += decision.dir * move * decision.sizeFraction;
+    costs += cost * decision.sizeFraction;
     if (gotBps > 0) wins++;
     else if (gotBps < 0) losses++;
+    if (decision.dir * move > 0) right++;
+    else if (decision.dir * move < 0) wrong++;
     best = best === null ? gotBps : Math.max(best, gotBps);
     worst = worst === null ? gotBps : Math.min(worst, gotBps);
     total += gotBps * decision.sizeFraction;
@@ -130,7 +183,11 @@ function leg(recs: DecisionRecord[], horizonS: number, feeBps: number, decide: (
     trades,
     wins,
     losses,
+    right,
+    wrong,
     totalBps: total,
+    grossBps: gross,
+    costBps: costs,
     staked,
     // Per normal stake put down, not per trade, so a rule is not marked down for betting smaller.
     avgBps: staked > 0 ? total / staked : null,
@@ -141,27 +198,30 @@ function leg(recs: DecisionRecord[], horizonS: number, feeBps: number, decide: (
   };
 }
 
-function report(recs: DecisionRecord[], { feeBps, notionalUsd }: PnlOptions, decide: (rec: DecisionRecord, horizonS: number) => Decision): Pnl {
+function report(recs: DecisionRecord[], { feeBpsPerSide, notionalUsd }: PnlOptions, decide: (rec: DecisionRecord, horizonS: number) => Decision): Pnl {
   return {
     n: recs.length,
     since: recs.length > 0 ? Math.min(...recs.map(r => r.tState)) : null,
-    feeBps,
+    feeBpsPerSide,
     notionalUsd,
-    legs: Object.values(DIRECTIONS).map(d => leg(recs, d.seconds, feeBps, decide)),
+    legs: Object.values(DIRECTIONS).map(d => leg(recs, d.seconds, feeBpsPerSide, decide)),
   };
 }
 
 /**
- * All three rules over the same finished decisions. `news` can be every finished news record the
+ * All four rules over the same finished decisions. `news` can be every finished news record the
  * dashboard has kept, about any instrument; only ones matching `opts.product` are ever looked at.
  * It can be empty (most sources publish only a few times an hour, so long quiet stretches are
- * normal) and the selective rule simply never gets a fundamental opinion during them.
+ * normal) and the selective rule simply never gets a fundamental opinion during them. `models`
+ * are the order-book models whose calm condition the orderBook rule follows.
  */
-export function pnlReport(recs: DecisionRecord[], opts: PnlOptions, news: readonly NewsRecord[] = []): PnlSet {
+export function pnlReport(recs: DecisionRecord[], opts: PnlOptions, news: readonly NewsRecord[] = [], models: readonly RidgeModel[] = orderBookModels): PnlSet {
   const relevant = news.filter(n => n.symbol === opts.product);
   return {
     asAnswered: report(recs, opts, asAnsweredDecision),
     corrected: report(recs, opts, correctedDecision),
     selective: report(recs, opts, (rec, h) => selectiveDecision(rec, h, relevant)),
+    orderBook: report(recs, opts, (rec, h) => orderBookDecision(rec, h, opts.feeBpsPerSide, models)),
+    orderBookReach: Object.values(DIRECTIONS).map(d => orderBookReach(recs, d.seconds, opts.feeBpsPerSide, models)),
   };
 }

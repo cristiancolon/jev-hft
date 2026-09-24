@@ -7,9 +7,11 @@ import { config } from './config.ts';
 import { nowMs, type MarketEvent } from './feed/types.ts';
 import { Backoff } from './lib/backoff.ts';
 import { encode } from './market/encode.ts';
+import { bookShape } from './market/microstructure.ts';
 import { MarketState, type Features } from './market/state.ts';
-import { decide, directionSignal, flatThresholds, isTimeout, RateLimitedError, type DirectionId, type FlatThresholds, type ModelResult } from './model/jev.ts';
+import { decide, directionSignal, flatThresholds, isOutOfCredits, isTimeout, RateLimitedError, type DirectionId, type FlatThresholds, type ModelResult } from './model/jev.ts';
 import { LeanBook, type LeanReading } from './model/lean.ts';
+import { orderBookSignals } from './model/ridge.ts';
 import type { Emit } from './telemetry/events.ts';
 
 export type DecisionRecord = {
@@ -41,9 +43,16 @@ export type DecisionRecord = {
   lean?: Record<DirectionId, LeanReading>;
   /**
    * Directional signals: Jev per horizon as answered (`jev_*`), the same with its usual lean
-   * taken out (`jevc_*`, src/model/lean.ts), and the zero-latency baselines.
+   * taken out (`jevc_*`, src/model/lean.ts), the zero-latency baselines, and the order-book
+   * model's expected move in bps (`ob_10s`, `ob_60s`, src/model/ridge.ts).
    */
   signals: Record<string, number>;
+  /** Best bid and ask at the snapshot. Records from before costs were charged have none. */
+  quote?: { bid: number; ask: number };
+  /** Best bid and ask when the answer arrived: what a trade placed then would have crossed. Live runs only. */
+  quoteResp?: { bid: number; ask: number };
+  /** 60-second volatility at the snapshot, bps. The order-book model is right more often when it is low. */
+  vol60?: number;
   midState: number;
   midResp: number;
   /** Horizon seconds -> mid at tState + H and at tResp + H. */
@@ -79,6 +88,14 @@ export function answerFields(res: ModelResult, f: Features, flat: FlatThresholds
   };
 }
 
+/**
+ * What the order-book model expects, and the prices a trade would have crossed, from the book as
+ * it stood at the snapshot. Shared by live runs and backtests.
+ */
+export function bookFields(f: Features, state: MarketState) {
+  return { signals: orderBookSignals({ ...f, ...bookShape(state) }), quote: { bid: f.bid, ask: f.ask }, vol60: f.vol60 };
+}
+
 export function fillForward(rec: DecisionRecord, state: MarketState) {
   // A horizon that has not elapsed yet (run stopped early) is unknown, not "unchanged".
   const at = (t: number) => (t <= state.lastRecvTs ? state.midAt(t) : NaN);
@@ -90,10 +107,12 @@ export function fillForward(rec: DecisionRecord, state: MarketState) {
 
 export class LiveEngine {
   readonly state = new MarketState();
-  readonly stats = { decisions: 0, written: 0, rateLimited: 0, timeouts: 0, errors: 0, lastModelMs: NaN, costUsd: 0 };
+  readonly stats = { decisions: 0, written: 0, rateLimited: 0, timeouts: 0, errors: 0, outOfCredits: 0, lastModelMs: NaN, costUsd: 0 };
   private inFlight = 0;
   private lastDecision = -Infinity;
   private readonly backoff = new Backoff();
+  /** Out of credits: try again after a minute, then less and less often, up to every 15 minutes. */
+  private readonly creditBackoff = new Backoff(60_000, 15 * 60_000);
   /** Jev's recent answers, which each new one is read against. */
   private readonly leans = new LeanBook();
   private readyAt = NaN;
@@ -142,7 +161,8 @@ export class LiveEngine {
       now - this.readyAt < config.warmupMs ||
       this.inFlight >= config.maxInFlight ||
       now - this.lastDecision < config.minIntervalMs ||
-      this.backoff.waiting(now)
+      this.backoff.waiting(now) ||
+      this.creditBackoff.waiting(now)
     )
       return;
     this.lastDecision = now;
@@ -169,12 +189,17 @@ export class LiveEngine {
         flatBps: flat,
         features: { mid: f.mid, spreadBps: f.spreadBps, imb1: f.imb1, imb5: f.imb5, imb20: f.imb20, ret5: f.ret5, ret60: f.ret60, vol60: f.vol60, flow5: f.flow5, trades5: f.trades5 },
       });
+      // Worked out after the request has been started, like the telemetry above, from the book
+      // as it stands now, which is the book the snapshot saw (nothing else runs in between).
+      const book = bookFields(f, this.state);
       const res = await answer;
       const tResp = nowMs();
       this.backoff.succeed();
+      this.creditBackoff.succeed();
       this.stats.decisions++;
       this.stats.lastModelMs = tResp - tBuilt;
       this.stats.costUsd += res.meta.costUsd ?? 0;
+      const answered = answerFields(res, f, flat, this.leans.take(tResp, res.probabilities));
       this.pending.push({
         v: 2,
         mode: 'live',
@@ -185,7 +210,11 @@ export class LiveEngine {
         modelMs: tResp - tBuilt,
         tResp,
         state: text,
-        ...answerFields(res, f, flat, this.leans.take(tResp, res.probabilities)),
+        ...answered,
+        signals: { ...answered.signals, ...book.signals },
+        quote: book.quote,
+        quoteResp: { bid: this.state.book.bestBid, ask: this.state.book.bestAsk },
+        vol60: book.vol60,
         midState: f.mid,
         midResp: this.state.book.mid,
         fwdState: {},
@@ -214,6 +243,11 @@ export class LiveEngine {
         const wait = this.backoff.fail(nowMs());
         this.log(`rate limited; pausing decisions ${(wait / 1000).toFixed(0)}s`);
         this.emit({ type: 'fail', program: 'live', id, kind: 'rate-limit', message });
+      } else if (isOutOfCredits(error)) {
+        this.stats.outOfCredits++;
+        const wait = this.creditBackoff.fail(nowMs());
+        this.log(`out of credits; asking again in ${(wait / 60_000).toFixed(0)} min (${message})`);
+        this.emit({ type: 'fail', program: 'live', id, kind: 'error', message });
       } else if (isTimeout(error)) {
         this.stats.timeouts++;
         this.emit({ type: 'fail', program: 'live', id, kind: 'timeout', message });

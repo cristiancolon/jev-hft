@@ -26,6 +26,7 @@ and records every answer together with what the price did next.
 | No question already waiting | 1 at a time (`JEV_MAX_INFLIGHT`) | one at a time keeps every answer as fresh as possible |
 | Minimum gap between questions | 1 second (`JEV_MIN_INTERVAL_MS`) | see below |
 | Not paused after "too many requests" | pause 5 s, doubling up to 60 s | respect the rate limit without hammering it |
+| Not paused after "no credits left" | pause 1 minute, doubling up to 15 minutes | an empty account doesn't refill in seconds; asking every second only fills the log ([decisions.md](decisions.md#d56-running-out-of-credits-pauses-the-engine-for-minutes)) |
 
 **Why once a second, and not as fast as possible?** Asking again the moment an answer comes back
 gives about 2.7 decisions a second and costs about $8 a day. But decisions that close together
@@ -59,12 +60,19 @@ about a quarter of a second old when it arrived.
 | `flatBps` | the move that counted as "flat" in each of this decision's questions |
 | `probabilities`, `confidence` | Jev's raw answers, and how sure TypeSafe says it was of each (the probability of the answer it picked) |
 | `lean` | what Jev's lean had usually been over the 15 minutes before this answer, per question, and how far its leans typically strayed from that; unknown for the first minute of a run |
-| `signals` | Jev's signal for each horizon as answered (`jev_*`), the same with its usual lean taken out (`jevc_*`, which is what gets acted on), plus four simple rules computed from the same snapshot (book imbalance at 1 and 5 levels, 5-second order flow, 5-second momentum) |
+| `signals` | Jev's signal for each horizon as answered (`jev_*`), the same with its usual lean taken out (`jevc_*`, which is what gets acted on), four simple rules computed from the same snapshot (book imbalance at 1 and 5 levels, 5-second order flow, 5-second momentum), and the order-book model's expected move in bp over 10 and 60 seconds (`ob_10s`, `ob_60s`, [accuracy.md](accuracy.md)) |
+| `quote`, `quoteResp` | the best bid and ask at the snapshot and when the answer arrived: what a trade placed then would have had to cross. A backtest has only the first |
+| `vol60` | how much the price had been jumping about over the last minute, at the snapshot: the order-book model is right more often when it is low |
 | `midState`, `midResp` | the price at the snapshot and when the answer arrived |
 | `fwdState`, `fwdResp` | the prices at each horizon, measured from the snapshot and from the answer |
 
 - **Why keep the simple rules in every record?** The real question is whether Jev beats them after
   its delay. Without them, a Jev result couldn't be judged.
+- **Why work out the order-book model after Jev has been asked?** It takes about 10 µs, but the
+  request is sent first anyway, like the dashboard's messages, so nothing it does can delay Jev.
+  It reads the book once per decision and adds nothing to the handling of each market event.
+- **Why save the bid and ask?** So every trade in the reports and on the dashboard can be charged
+  the spread it would really have crossed, not just a fee ([decisions.md](decisions.md#d55-every-trade-pays-two-fees-and-the-spread-and-the-fee-is-set-per-fill)).
 - **Why store prices instead of price changes?** So the report can measure changes any way it
   likes later, without rerunning anything.
 - **Why measure from two moments?** From the snapshot shows whether Jev saw something real; from
@@ -103,12 +111,13 @@ still about 0.02% of a decision) and about 11 MB an hour of disk.
 Every 10 seconds `npm run live` prints something like:
 
 ```
-mid 81205.74  ev/s 20  feed lag p50 86ms  event cost p50 48µs p99 1302µs  decisions 50  written 0  model 267ms  429s 0  timeouts 0  errors 0  cost $0.0017
+mid 81205.74  ev/s 20  feed lag p50 86ms  event cost p50 48µs p99 1302µs  decisions 50  written 0  model 267ms  429s 0  timeouts 0  errors 0  no-credit 0  cost $0.0017
 ```
 
 That's the price, market updates per second, how delayed the market data is, how long each
 update took to handle, decisions made and written, Jev's last response time, how many requests
-were refused, timed out, or failed, and what the run has cost so far.
+were refused, timed out, failed, or turned away because the account had no credits, and what the
+run has cost so far.
 
 ## Tested
 

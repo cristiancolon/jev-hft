@@ -29,8 +29,6 @@ const HOST = process.env.DASHBOARD_HOST || '127.0.0.1';
 const HTTP_PORT = envNum('DASHBOARD_PORT', 4000, { min: 1 });
 const UDP_PORT = envNum('TELEMETRY_PORT', DEFAULT_TELEMETRY_PORT, { min: 1 });
 const MAX_SPREAD_BPS = envNum('MAX_SPREAD_BPS', 50, { min: 0 });
-/** Charged to both ends of every trade the profit-and-loss card counts. Zero by default: it shows what the moves alone were worth. */
-const FEE_BPS = envNum('FEE_BPS', 0, { min: 0 });
 /** The stake behind each trade, so the running total can be shown in money. */
 const NOTIONAL_USD = envNum('PNL_NOTIONAL_USD', 10_000, { min: 0 });
 const DECISIONS_DIR = 'data/decisions';
@@ -230,7 +228,7 @@ function followRecords() {
     if (scoreDirty) {
       scoreDirty = false;
       publish({ type: 'scoreboard', program: 'live', board: scoreboard(scored) });
-      publish({ type: 'pnl', program: 'live', pnl: pnlReport(scored, { feeBps: FEE_BPS, notionalUsd: NOTIONAL_USD, product: config.product }, newsForPnl) });
+      publish({ type: 'pnl', program: 'live', pnl: pnlReport(scored, { feeBpsPerSide: config.feeBpsPerSide, notionalUsd: NOTIONAL_USD, product: config.product }, newsForPnl) });
     }
   } catch (error) {
     log(`reading finished records: ${(error as Error).message}`);
