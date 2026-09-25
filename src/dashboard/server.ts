@@ -33,7 +33,7 @@ const HTTP_PORT = envNum('DASHBOARD_PORT', 4000, { min: 1 });
 const UDP_PORT = envNum('TELEMETRY_PORT', DEFAULT_TELEMETRY_PORT, { min: 1 });
 const MAX_SPREAD_BPS = envNum('MAX_SPREAD_BPS', 50, { min: 0 });
 /** The stake behind each trade, so the running total can be shown in money. */
-const NOTIONAL_USD = envNum('PNL_NOTIONAL_USD', 10_000, { min: 0 });
+const NOTIONAL_USD = envNum('PNL_NOTIONAL_USD', 100, { min: 0 });
 const DECISIONS_DIR = 'data/decisions';
 const ITEMS_DIR = 'data/news';
 /** Finished decisions the scoreboard looks back over (about 50 minutes at one a second). */

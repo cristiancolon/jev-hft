@@ -232,7 +232,7 @@ nothing at all while its tab is in the background.
 | `TELEMETRY_PORT` | `4100` | the port the dashboard listens on for the pipeline's messages |
 | `DASHBOARD_HOST` | `127.0.0.1` | which network address to listen on. `0.0.0.0` makes the page reachable from other machines |
 | `FEE_BPS_PER_SIDE` | `5` | the exchange's fee on each fill, in bp; every trade in the profit and loss pays it twice, plus the spread |
-| `PNL_NOTIONAL_USD` | `10000` | the stake behind each trade, so the total can be shown in money |
+| `PNL_NOTIONAL_USD` | `100` | the stake behind each trade, so the total can be shown in money |
 
 ## Watching a Raspberry Pi
 

@@ -59,7 +59,7 @@ program with a clear message.
 | `MOCK_LATENCY_MS` | `375` | how long the mock takes to answer |
 | `RUN_MINUTES` | `0` | stop after this many minutes (0 means run until stopped) |
 | `FEE_BPS_PER_SIDE` | `5` | the exchange's fee on each fill, in bp, as its fee schedule quotes it (0.60% is 60). Every trade in the reports and the dashboard's profit and loss pays it twice, plus the spread. 5 is Coinbase's lowest published taker fee; 0 shows what the moves alone were worth. The old `FEE_BPS` (a round-trip figure) still works, read as half on each side |
-| `PNL_NOTIONAL_USD` | `10000` | the stake behind each trade in the dashboard's profit and loss |
+| `PNL_NOTIONAL_USD` | `100` | the stake behind each trade in the dashboard's profit and loss |
 
 **Dashboard** ([dashboard.md](dashboard.md))
 
