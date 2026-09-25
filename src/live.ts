@@ -1,8 +1,10 @@
-// Live paper pipeline: Coinbase feed -> state -> Jev -> decision log. No orders are sent.
+// Live paper pipeline: Coinbase feed -> state -> order-book model (and Jev, if asked) -> decision log.
+// No orders are sent.
 //
-//   npm run live                                   # gateway, run until Ctrl-C
-//   JEV_PROVIDER=mock RUN_MINUTES=5 npm run live   # full pipeline, simulated model
-//   RECORD=1 npm run live                          # also save the market data for replay
+//   npm run live                                                # the order-book model alone, until Ctrl-C
+//   JEV_MARKET=1 npm run live                                   # Jev asked every second as well (D63)
+//   JEV_MARKET=1 JEV_PROVIDER=mock RUN_MINUTES=5 npm run live   # the same, with a simulated Jev
+//   RECORD=1 npm run live                                       # also save the market data for replay
 
 import { mkdirSync, createWriteStream } from 'node:fs';
 import { performance } from 'node:perf_hooks';
@@ -15,18 +17,21 @@ import { summarize } from './lib/stats.ts';
 import { createModel, keepWarm } from './model/jev.ts';
 import { parseTarget, telemetrySender } from './telemetry/sender.ts';
 
+/** Who answers: the route to Jev, or "none" when only the order-book model decides. */
+const provider = config.askJevAboutMarket ? config.provider : 'none';
 mkdirSync('data/decisions', { recursive: true });
-const file = `data/decisions/live-${config.provider}-${fileStamp()}.jsonl`;
+const file = `data/decisions/live-${provider}-${fileStamp()}.jsonl`;
 const out = createWriteStream(file);
 
 // What the dashboard sees. Fire-and-forget: the pipeline never waits for it (docs/dashboard.md).
 const target = parseTarget(process.env.TELEMETRY);
 const telemetry = telemetrySender('live', target);
 
-const engine = new LiveEngine(createModel(config.provider), r => out.write(JSON.stringify(r) + '\n'), log, telemetry.emit);
+const model = config.askJevAboutMarket ? createModel(config.provider) : null;
+const engine = new LiveEngine(model, r => out.write(JSON.stringify(r) + '\n'), log, telemetry.emit);
 // RECORD=1: save the events this run sees, so the exact same run can be replayed later.
 const rec = config.record ? recorder(config.product) : undefined;
-const stopWarm = keepWarm(config.provider, log); // matters when decisions are more than a few seconds apart
+const stopWarm = model ? keepWarm(config.provider, log) : () => {}; // matters when decisions are more than a few seconds apart
 
 // Per-window measurements of the data side: feed lag and event processing cost.
 let events = 0;
@@ -47,8 +52,8 @@ const feed = coinbaseFeed(
 );
 
 log(
-  `live ${config.product} provider=${config.provider} encoding=${config.encoding} warmup=${config.warmupMs / 1000}s ` +
-    `spacing>=${config.minIntervalMs}ms flat=${config.flatSigmas > 0 ? `${config.flatSigmas} x typical move` : 'fixed'} -> ${file}` +
+  `live ${config.product} ${model ? `provider=${config.provider} encoding=${config.encoding}` : 'order-book model only, Jev not asked (JEV_MARKET=1 to ask)'} warmup=${config.warmupMs / 1000}s ` +
+    `spacing>=${config.minIntervalMs}ms${model ? ` flat=${config.flatSigmas > 0 ? `${config.flatSigmas} x typical move` : 'fixed'}` : ''} -> ${file}` +
     (rec ? `\nalso recording market data -> ${rec.file}` : '') +
     (target ? `\ndashboard telemetry -> udp://${target.host}:${target.port} (npm run dashboard to watch; TELEMETRY=0 turns it off)` : ''),
 );
@@ -68,7 +73,7 @@ const pulse = target
       telemetry.emit({
         type: 'pulse',
         program: 'live',
-        meta: { provider: config.provider, product: config.product, minIntervalMs: config.minIntervalMs, flatSigmas: config.flatSigmas, warmupMs: config.warmupMs, recording: rec !== undefined },
+        meta: { provider, product: config.product, minIntervalMs: config.minIntervalMs, flatSigmas: config.flatSigmas, warmupMs: config.warmupMs, recording: rec !== undefined },
         market: ready ? { ready, mid: book.mid, bid: book.bestBid, ask: book.bestAsk } : { ready, mid: null, bid: null, ask: null },
         stats: { decisions: s.decisions, written: s.written, rateLimited: s.rateLimited, timeouts: s.timeouts, errors: s.errors, costUsd: s.costUsd },
         feed: { eventsPerS: events - seenEvents, lagMs: recent.length > 0 ? recent[recent.length >> 1]! : null },

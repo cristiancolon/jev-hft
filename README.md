@@ -18,8 +18,10 @@ There are two parts, and each can be run on its own:
   would it push the price, how big a move, and is it actually new? Then it records what the
   prices did over the next 30 minutes.
 - **The market-data part** (`npm run live`) watches Bitcoin's order book and trades on Coinbase,
-  sums up what's happening in a few lines of text, and once a second asks Jev whether the price
-  will be higher, lower, or about the same in 2, 10, and 60 seconds.
+  and once a second records what a small model of the order book expects the price to do over the
+  next 10 and 60 seconds. It used to ask Jev as well, in a few lines of text, whether the price
+  would be higher, lower, or about the same in 2, 10, and 60 seconds; five days showed Jev added
+  nothing there, so that is now off unless `JEV_MARKET=1` ([decisions.md](docs/decisions.md) D63).
 
 Reports (`npm run analyze:news`, `npm run analyze`) then check how often Jev was right, whether
 its answers came fast enough to act on, and what they cost.
@@ -84,7 +86,7 @@ normally stocks aren't asked about while their market is closed.)
 
 ```bash
 npm run news                              # the news part, live
-npm run live                              # the market-data part, live
+npm run live                              # the market-data part, live (JEV_MARKET=1 asks Jev too)
 npm run record                            # save Coinbase market data to disk
 npm run backtest -- data/raw/<file>       # replay saved data and ask Jev about it
 npm run analyze:news -- data/decisions/news-<file>.jsonl

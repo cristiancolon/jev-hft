@@ -90,6 +90,13 @@ export const config = {
   record: process.env.RECORD === '1',
   /** Which route to Jev: typesafe (direct, the fastest), gateway, or mock (src/model/jev.ts). */
   provider: process.env.JEV_PROVIDER || 'typesafe',
+  /**
+   * Whether the market-data program asks Jev about the market every second (JEV_MARKET=1). Off by
+   * default: over five days its calls added nothing the order book didn't already say, never came
+   * near paying for a trade, and used nearly all of the account's credits, which starved the news
+   * path when they ran out (docs/decisions.md D63). The news program always asks Jev.
+   */
+  askJevAboutMarket: process.env.JEV_MARKET === '1',
   encoding: envChoice<Encoding>('JEV_ENCODING', 'compact', ['compact', 'json']),
   /**
    * Minimum spacing between market-data decisions. Asking back to back (0) gives about 2.7

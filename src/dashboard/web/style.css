@@ -616,6 +616,10 @@ pre,
   font-size: 12.5px;
 }
 
+/* Jev is not asked about the market (JEV_MARKET is off, D63): its cards have nothing to show. */
+[data-jev='false'] .jev-only {
+  display: none;
+}
 .pnl-sub {
   margin: -8px 0 10px;
   font-size: 12px;

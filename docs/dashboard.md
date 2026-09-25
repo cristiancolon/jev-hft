@@ -9,6 +9,10 @@ Everything the pipeline is doing, as it does it:
 
 **Market data** (when `npm run live` is running)
 
+When the run doesn't ask Jev about the market (the default since D63), the cards that are about
+Jev's answers step aside: the two that trade them, the latest answer, what Jev was shown, and its
+response time. The scoreboard then compares the order-book model with the simple rules alone.
+
 - The price, how far apart the bid and ask are, how delayed the data is, and how long one update
   takes to handle.
 - A chart of the price with Jev's calls marked where and when each answer arrived: a triangle

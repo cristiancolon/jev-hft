@@ -60,7 +60,7 @@ test('a decision is recorded with what was asked, what was answered, simple rule
   assert.equal(r.v, 2);
   assert.equal(r.mode, 'live');
   assert.deepEqual(r.flatBps, { dir_2s: 0.5, dir_10s: 1, dir_60s: 3 }, 'volatility is not known yet, so the fixed thresholds were asked');
-  assert.deepEqual(r.probabilities.dir_10s, { up: 0.8, down: 0.1, flat: 0.1 });
+  assert.deepEqual(r.probabilities!.dir_10s, { up: 0.8, down: 0.1, flat: 0.1 });
   assert.ok(Math.abs(r.signals.jev_10s! - 0.7) < 1e-12);
   assert.ok(Math.abs(r.signals.obi1! - 1 / 3) < 1e-12, 'book imbalance: (2 - 1) / (2 + 1)');
   assert.equal(r.midState, 100);
@@ -196,4 +196,41 @@ test('an engine nobody is watching behaves exactly the same', async () => {
   await settle();
   engine.flush(Infinity, true);
   assert.equal(written.length, 1);
+});
+
+test("without Jev, each decision is the order-book model's alone, acted on a moment after its snapshot", async () => {
+  Object.assign(config, { warmupMs: 0, minIntervalMs: 3_600_000 });
+  const written: DecisionRecord[] = [];
+  const told: TelemetryBody[] = [];
+  const engine = new LiveEngine(null, r => written.push(r), () => {}, e => told.push(e), 20);
+  const t = nowMs();
+  engine.onEvent(book(t, 100, true));
+  await new Promise(resolve => setTimeout(resolve, 60));
+  engine.onEvent(book(t + 30_000, 101));
+  engine.onEvent(book(t + 61_000, 103));
+  assert.equal(written.length, 1);
+  const r = written[0]!;
+  assert.equal(r.provider, 'none');
+  assert.equal(r.probabilities, undefined, 'no answer, and none made up');
+  assert.equal(r.state, '', 'nothing was sent anywhere');
+  assert.ok(r.tResp - r.tState >= 20, 'acted on after the delay, not at the snapshot');
+  assert.equal(r.modelMs, 0);
+  assert.ok('ob_10s' in r.signals && 'ob_60s' in r.signals);
+  assert.ok(!Object.keys(r.signals).some(k => k.startsWith('jev')), 'no Jev signals');
+  assert.ok(Math.abs(r.signals.obi1! - 1 / 3) < 1e-12, 'the simple rules are still recorded');
+  assert.deepEqual(r.quoteResp, { bid: 99.5, ask: 100.5 });
+  assert.equal(r.fwdResp[30], 101, 'later prices are filled in as usual');
+  assert.equal(engine.stats.costUsd, 0);
+  assert.deepEqual(told.map(e => e.type), ['ask'], 'the dashboard hears what the book looked like, and of no answer');
+});
+
+test('without Jev, a run still keeps its spacing', async () => {
+  Object.assign(config, { warmupMs: 0, minIntervalMs: 1000 });
+  const written: DecisionRecord[] = [];
+  const engine = new LiveEngine(null, r => written.push(r), () => {}, () => {}, 0);
+  const t = nowMs();
+  for (let k = 0; k < 20; k++) engine.onEvent(book(t + k * 10, 100, k === 0));
+  await settle();
+  engine.flush(Infinity, true);
+  assert.equal(written.length, 1, 'twenty events within a second make one decision');
 });

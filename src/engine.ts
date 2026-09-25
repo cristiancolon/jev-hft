@@ -1,6 +1,12 @@
-// Live decision loop: market events -> state -> Jev -> decision record.
+// Live decision loop: market events -> state -> decision record, once a second.
 // Every stage is timestamped so the analyzer can attribute latency, and each record
 // waits for its forward mids before being written.
+//
+// A decision is the order-book model's call (src/model/ridge.ts). Jev is asked as well only when
+// JEV_MARKET=1: over five days its calls added nothing the book didn't already say, and never
+// came near paying for a trade, while using nearly all of the account's credits (docs/decisions.md
+// D63). Without Jev, a decision is acted on a fixed moment after its snapshot instead of when an
+// answer arrives.
 
 import type { Experimental_EvaluationModel as EvaluationModel } from 'ai';
 import { config } from './config.ts';
@@ -30,10 +36,12 @@ export type DecisionRecord = {
   costUsd?: number; // list price of the call
   /** Which build of Jev answered ("jev-1.13.0"), when the route says. Only the direct API does. */
   modelVersion?: string;
+  /** Exactly what Jev was sent; empty when Jev was not asked. */
   state: string;
   /** The move that counted as "flat" in each question (v2; before that, the fixed DIRECTIONS values). */
   flatBps?: FlatThresholds;
-  probabilities: ModelResult['probabilities'];
+  /** Jev's answer. None when Jev was not asked (provider "none", D63). */
+  probabilities?: ModelResult['probabilities'];
   /** TypeSafe's confidence in each answer: the probability of the answer it picked, which is usually "flat". */
   confidence?: Record<string, number>;
   /**
@@ -105,6 +113,12 @@ export function fillForward(rec: DecisionRecord, state: MarketState) {
   }
 }
 
+/**
+ * How long after its snapshot a decision without Jev is acted on: the time the research allowed
+ * for an order to reach the exchange, and what the order-book model was tested at (docs/accuracy.md).
+ */
+export const ACT_DELAY_MS = 300;
+
 export class LiveEngine {
   readonly state = new MarketState();
   readonly stats = { decisions: 0, written: 0, rateLimited: 0, timeouts: 0, errors: 0, outOfCredits: 0, lastModelMs: NaN, costUsd: 0 };
@@ -120,15 +134,18 @@ export class LiveEngine {
   private pending: DecisionRecord[] = [];
   private readonly maxHorizonMs = Math.max(...config.horizons) * 1000;
 
-  private readonly model: EvaluationModel;
+  /** null: Jev is not asked, and each decision is the order-book model's alone. */
+  private readonly model: EvaluationModel | null;
+  private readonly actDelayMs: number;
   private readonly write: (r: DecisionRecord) => void;
   private readonly log: (s: string) => void;
   /** Tells the dashboard what is happening. Does nothing unless a runner wires it up. */
   private readonly emit: Emit;
   private asked = 0;
 
-  constructor(model: EvaluationModel, write: (r: DecisionRecord) => void, log: (s: string) => void, emit: Emit = () => {}) {
+  constructor(model: EvaluationModel | null, write: (r: DecisionRecord) => void, log: (s: string) => void, emit: Emit = () => {}, actDelayMs = ACT_DELAY_MS) {
     this.model = model;
+    this.actDelayMs = actDelayMs;
     this.write = write;
     this.log = log;
     this.emit = emit;
@@ -166,10 +183,58 @@ export class LiveEngine {
     )
       return;
     this.lastDecision = now;
-    void this.decideNow();
+    void (this.model ? this.decideNow(this.model) : this.bookOnly());
   }
 
-  private async decideNow() {
+  /**
+   * A decision without Jev: the order-book model's call, from the book at the snapshot, acted on
+   * `actDelayMs` later at the prices then. The dashboard is told what the book looked like, as it
+   * is when Jev is asked, but there is no answer to tell it about.
+   */
+  private async bookOnly() {
+    const tState = nowMs();
+    const f = this.state.features(tState);
+    const book = bookFields(f, this.state);
+    const tBuilt = nowMs();
+    const id = ++this.asked;
+    this.inFlight++;
+    try {
+      this.emit({
+        type: 'ask',
+        program: 'live',
+        id,
+        tState,
+        state: '',
+        flatBps: flatThresholds(f.vol60, config.flatSigmas),
+        features: { mid: f.mid, spreadBps: f.spreadBps, imb1: f.imb1, imb5: f.imb5, imb20: f.imb20, ret5: f.ret5, ret60: f.ret60, vol60: f.vol60, flow5: f.flow5, trades5: f.trades5 },
+      });
+      if (this.actDelayMs > 0) await new Promise(resolve => setTimeout(resolve, this.actDelayMs));
+      this.stats.decisions++;
+      this.pending.push({
+        v: 2,
+        mode: 'live',
+        provider: 'none',
+        tState,
+        exchLagMs: tState - f.exchTs,
+        buildMs: tBuilt - tState,
+        modelMs: 0,
+        tResp: nowMs(),
+        state: '',
+        signals: { ...baselineSignals(f), ...book.signals },
+        quote: book.quote,
+        quoteResp: { bid: this.state.book.bestBid, ask: this.state.book.bestAsk },
+        vol60: book.vol60,
+        midState: f.mid,
+        midResp: this.state.book.mid,
+        fwdState: {},
+        fwdResp: {},
+      });
+    } finally {
+      this.inFlight--;
+    }
+  }
+
+  private async decideNow(model: EvaluationModel) {
     const tState = nowMs();
     const f = this.state.features(tState);
     const text = encode(f, this.state, config.product, config.encoding);
@@ -179,7 +244,7 @@ export class LiveEngine {
     this.inFlight++;
     try {
       // The request is started first and reported second, so telemetry is never in its way.
-      const answer = decide(this.model, text, flat, AbortSignal.timeout(config.timeoutMs));
+      const answer = decide(model, text, flat, AbortSignal.timeout(config.timeoutMs));
       this.emit({
         type: 'ask',
         program: 'live',
@@ -230,7 +295,7 @@ export class LiveEngine {
         providerMs: rec.providerMs ?? null,
         inputTokens: rec.inputTokens ?? null,
         costUsd: rec.costUsd ?? null,
-        probabilities: rec.probabilities,
+        probabilities: res.probabilities,
         confidence: rec.confidence ?? null,
         lean: rec.lean ?? null,
         signals: rec.signals,

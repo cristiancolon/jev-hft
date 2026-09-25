@@ -880,3 +880,31 @@ basis point.
 a resting order is not always filled and tends to fill when the price moves against it, which
 needs its own model. If the moves themselves are to be Binance.US's, the pipeline has to price
 from its recording too.
+
+## D63. Jev is not asked about the market every second
+
+**Chosen:** `npm run live` records the order-book model's call once a second and no longer asks
+Jev, unless `JEV_MARKET=1`. A decision is acted on 300 ms after its snapshot (`ACT_DELAY_MS` in
+`src/engine.ts`), and the dashboard's Jev cards step aside. The news program asks Jev as before.
+
+**Why:** at 10 and 60 seconds Jev's calls had nothing left to show. Over five days they were right
+52 to 54% of the time at 10 s and no better than a coin flip at 60 s, and added nothing to a fit
+that already had the order book ([accuracy.md](accuracy.md)). The most they were expected to
+catch, about 0.2 bp, is a twentieth of a round trip on Binance.US (D62), so the rule that trades
+only what pays for itself (D59) never traded them. Meanwhile they were 99.7% of what Jev cost,
+$2.91 of $2.92 over one day, and when the credits ran out on 2026-09-22 the news program lost 233
+headlines it could not get answered. The news path is where Jev's reading of language might pay,
+and it was being starved by the path where it doesn't.
+
+**Why keep the program running at all:** the order-book model is what the 10 and 60 s research
+found worth running, and its card and the scoreboard keep measuring it live, at no cost. Its
+records are also about a third the size, with no text sent anywhere.
+
+**Why 300 ms:** the order-book model was fitted and tested on moves measured from 300 ms after
+each snapshot, to allow for an order to reach the exchange. Acting at the snapshot itself would
+flatter it: entering at once, it was right 55.5% of the time, against 54.7% at 300 ms. With Jev
+the answer's own round trip, typically 100 to 250 ms, played that part.
+
+**When to rethink:** if Jev is retrained on market data, or given much less to read, turn it back
+on with `JEV_MARKET=1` for a day and compare it on the scoreboard.
+

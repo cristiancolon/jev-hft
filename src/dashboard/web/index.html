@@ -87,7 +87,7 @@
 
           <article class="card chart-card live-only wide">
             <header>
-              <h2>Price and Jev's calls</h2>
+              <h2 id="chart-title">Price and Jev's calls</h2>
               <div class="controls">
                 <div class="seg" id="seg-horizon" role="group" aria-label="Which of Jev's answers to mark">
                   <button data-v="2">2 s</button><button data-v="10" class="on">10 s</button><button data-v="60">60 s</button>
@@ -101,7 +101,7 @@
               <canvas id="chart"></canvas>
               <div class="tooltip" id="chart-tip" hidden></div>
             </div>
-            <footer class="legend">
+            <footer class="legend jev-only">
               <span><i class="tri up"></i>Jev says up</span>
               <span><i class="tri down"></i>down</span>
               <span><i class="circ"></i>no lean</span>
@@ -113,7 +113,7 @@
             </footer>
           </article>
 
-          <article class="card pnl-card">
+          <article class="card jev-only pnl-card">
             <header>
               <h2>If you had traded Jev's answers</h2>
               <span class="muted" id="pnl-sub"></span>
@@ -141,7 +141,7 @@
             <p class="footnote" id="pnl-note"></p>
           </article>
 
-          <article class="card pnl-card">
+          <article class="card jev-only pnl-card">
             <header>
               <h2>If you had traded selectively</h2>
               <span class="muted" id="fpnl-sub"></span>
@@ -225,7 +225,7 @@
             <p class="footnote" id="npnl-note"></p>
           </article>
 
-          <article class="card live-only" id="decision-card">
+          <article class="card jev-only live-only" id="decision-card">
             <header>
               <h2>Latest answer</h2>
               <span class="muted" id="decision-age"></span>
@@ -245,7 +245,7 @@
             </div>
           </article>
 
-          <article class="card live-only">
+          <article class="card jev-only live-only">
             <header><h2>What Jev was shown</h2></header>
             <pre class="state-text" id="state-text">—</pre>
           </article>
@@ -255,7 +255,7 @@
             <div class="gauges" id="gauges"></div>
           </article>
 
-          <article class="card live-only">
+          <article class="card jev-only live-only">
             <header>
               <h2>Response time</h2>
               <span class="muted" id="lat-count"></span>
@@ -283,7 +283,7 @@
 
           <article class="card wide-3up">
             <header>
-              <h2>Jev against simple rules</h2>
+              <h2 id="score-title">Jev against simple rules</h2>
               <span class="muted" id="score-n"></span>
             </header>
             <div id="scoreboard"></div>

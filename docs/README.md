@@ -27,8 +27,9 @@ The project has two ways of testing the idea:
 
 1. **The market-data path** (`npm run live`, `record`, `backtest`, `analyze`). It watches
    Bitcoin's order book and trades on Coinbase, summarizes what's happening into a short
-   paragraph, and asks Jev: "Will the price be higher, lower, or about the same in a few
-   seconds?"
+   paragraph, and asked Jev: "Will the price be higher, lower, or about the same in a few
+   seconds?" Jev added nothing the order book didn't already say, so the live program now
+   records the order-book model's calls alone unless `JEV_MARKET=1` (D63).
 2. **The news path** (`npm run news`, `analyze:news`). It collects news as it's published
    (from news feeds, a professional newswire, SEC filings, and official accounts on X) and
    asks Jev, for each item: "Does this matter for Bitcoin or this stock? Which way would it
@@ -74,7 +75,7 @@ check later whether Jev's judgments were right, and whether they arrived fast en
   round trip of about 4 bp on Binance.US, where trades would be placed, and 10 bp at Coinbase's
   cheapest ([accuracy.md](accuracy.md)).
 - **Cost is small:** about three thousandths of a cent per decision. The news path costs cents a
-  day; asking about the market once a second costs about $3 a day.
+  day; asking about the market once a second cost about $3 a day, and is off by default now (D63).
 
 ## Reading order
 

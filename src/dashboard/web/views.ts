@@ -24,14 +24,17 @@ export function renderPill(program: 'live' | 'news', state: Liveness, provider: 
   $(`pill-${program}`).dataset.state = state;
   const sub = $(`pill-${program}-sub`);
   if (state === 'off') setText(sub, msSinceHeard === null ? 'not running' : `stopped · last heard ${f.ago(msSinceHeard)}`);
-  else setText(sub, `${state === 'stale' ? 'quiet · ' : ''}${provider ?? ''}${run ? ` · up ${f.duration(Date.now() - run)}` : ''}`);
+  else setText(sub, `${state === 'stale' ? 'quiet · ' : ''}${provider === 'none' ? 'order book only' : (provider ?? '')}${run ? ` · up ${f.duration(Date.now() - run)}` : ''}`);
 }
 
 export function providerBadge(el: HTMLElement, provider: string | undefined) {
   el.hidden = !provider;
   if (!provider) return;
   el.classList.toggle('mock', provider === 'mock');
-  setText(el, provider === 'mock' ? 'practice model · random answers' : provider === 'typesafe' ? 'straight to TypeSafe' : 'through the gateway');
+  setText(
+    el,
+    provider === 'none' ? 'order-book model only · Jev not asked' : provider === 'mock' ? 'practice model · random answers' : provider === 'typesafe' ? 'straight to TypeSafe' : 'through the gateway',
+  );
 }
 
 // ---- market data: price and numbers ------------------------------------------------------
@@ -249,7 +252,7 @@ const PNL_RULES: Record<PnlCard, (horizonS: number) => string> = {
   fpnl: () =>
     `The same calls, but only when the best level of the order book points the same way: when the two disagreed, Jev was right less than half the time. It also sits out if a headline from the last 15 minutes leans the other way. What is left is staked by how strong the lean is next to Jev's ordinary one, up to twice the normal stake.`,
   opnl: h =>
-    `No Jev here: the order-book model (six measurements of the book, fitted on earlier days) says how far it expects the price to move in the next ${h} s${h === 10 ? ', and is only listened to when the last minute was calm and the spread was one tick, where the model was right most often' : ''}. It is scored from the moment Jev's answer arrived, like the other two.`,
+    `No Jev here: the order-book model (six measurements of the book, fitted on earlier days) says how far it expects the price to move in the next ${h} s${h === 10 ? ', and is only listened to when the last minute was calm and the spread was one tick, where the model was right most often' : ''}. It is scored from when the call is acted on: when Jev's answer arrived, or, in a run that doesn't ask Jev, 300 ms after the snapshot, the time the research allowed for an order to reach the exchange.`,
   npnl: h =>
     `Jev's verdict on each headline about Bitcoin: take the side it leans at the mid price the moment its answer arrived, close ${held(h)} later. Jev is asked what the news will do over the next 30 minutes; 1 and 5 minutes show whether closing early would have kept more of it. A headline counts from the moment it is answered, and its trade is settled as each check comes due.`,
 };
@@ -390,8 +393,13 @@ export function renderScoreboard(board: Scoreboard | null) {
   // A share of three or four decisions means nothing, so it is not shown until there are enough.
   const MIN_JUDGED = 20;
   const shown = (c: { hit: number | null; judged: number }) => (c.hit !== null && c.judged >= MIN_JUDGED ? c.hit : null);
-  const best = board.horizons.map((_, i) => Math.max(...board.rows.map(r => shown(r.cells[i]!) ?? -1)));
-  const rows = board.rows
+  // A run that doesn't ask Jev (D63) has nothing in its rows: leave them out, and what it adds beyond the rules with them.
+  const fromJev = (r: Scoreboard['rows'][number]) => r.key === 'jev' || r.key === 'jevc';
+  const withJev = board.rows.some(r => fromJev(r) && r.cells.some(c => c.n > 0));
+  const listed = withJev ? board.rows : board.rows.filter(r => !fromJev(r));
+  setText($('score-title'), withJev ? 'Jev against simple rules' : 'The order book against simple rules');
+  const best = board.horizons.map((_, i) => Math.max(...listed.map(r => shown(r.cells[i]!) ?? -1)));
+  const rows = listed
     .map(
       r => `<tr class="${r.isJev ? 'jev' : ''}"><td>${f.esc(r.label)}</td>${r.cells
         .map((c, i) => {
@@ -405,8 +413,12 @@ export function renderScoreboard(board: Scoreboard | null) {
   setHtml(
     el,
     `<table class="score"><thead><tr><th>pointed the right way</th>${board.horizons.map(h => `<th>${h} s<span class="wide-only"> ahead</span></th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
-     <p class="footnote">Only decisions where the price actually moved are counted, and a score appears once there are ${MIN_JUDGED} of them, so a quiet market fills this slowly. "rank" is how well the signal ordered the moves (−1 to +1, 0 = no relationship). Jev is judged from when its answer arrived; the rules, which take no time, from the snapshot.<br>
-     What is left of Jev's score once the four rules are accounted for: ${beyond}. Near zero means Jev is repeating what the rules already say.</p>`,
+     <p class="footnote">Only decisions where the price actually moved are counted, and a score appears once there are ${MIN_JUDGED} of them, so a quiet market fills this slowly. "rank" is how well the signal ordered the moves (−1 to +1, 0 = no relationship). ${
+       withJev
+         ? `Jev is judged from when its answer arrived; the rules, which take no time, from the snapshot.<br>
+     What is left of Jev's score once the four rules are accounted for: ${beyond}. Near zero means Jev is repeating what the rules already say.`
+         : 'Every rule is judged from the snapshot. Jev is not asked about the market in this run (JEV_MARKET=1 asks it).'
+     }</p>`,
   );
 }
 

@@ -189,7 +189,7 @@ for (const [id, d] of Object.entries(DIRECTIONS)) {
   const thresholds: number[] = [];
   let answers = { up: 0, down: 0, flat: 0, n: 0 };
   for (const r of recs) {
-    const p = r.probabilities[id as DirectionId];
+    const p = r.probabilities?.[id as DirectionId];
     const ret = bp(r.fwdState[d.seconds], r.midState);
     if (!p || !Number.isFinite(ret)) continue;
     const flat = num(r.flatBps?.[id as DirectionId]) || d.flatBps; // files from before thresholds were recorded used the fixed ones

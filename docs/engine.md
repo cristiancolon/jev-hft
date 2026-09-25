@@ -5,8 +5,15 @@ Code: `src/engine.ts` (the loop) and `src/live.ts` (the program that runs it). R
 
 ## What it does
 
-It asks Jev about Bitcoin once a second, always using the freshest possible view of the market,
-and records every answer together with what the price did next.
+Once a second it records what the order-book model ([accuracy.md](accuracy.md)) expects of
+Bitcoin's price over the next 10 and 60 seconds, from the freshest possible view of the market,
+together with what the price did next. The decision is acted on 300 ms after its snapshot, the
+time the research allowed for an order to reach the exchange.
+
+With `JEV_MARKET=1` it also asks Jev each time, and acts when the answer arrives; everything
+below about questions, answers, and pauses applies only then. That is off by default: over five
+days Jev's calls added nothing the book didn't already say, and used nearly all of the account's
+credits ([decisions.md](decisions.md#d63-jev-is-not-asked-about-the-market-every-second)).
 
 ## How a decision happens
 

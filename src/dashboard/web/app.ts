@@ -115,6 +115,10 @@ function frame() {
     // With no telemetry coming in, only the cards read from the saved records have anything to say.
     const running = state.live.pulse !== null;
     view.$('live-body').dataset.running = String(running);
+    // A run that doesn't ask Jev about the market says so; Jev's cards then step aside (D63).
+    const jev = state.live.pulse?.meta.provider !== 'none';
+    view.$('live-body').dataset.jev = String(jev);
+    view.$('chart-title').textContent = jev ? "Price and Jev's calls" : 'Price';
     view.$('live-stopped').hidden = running;
     view.$('news-empty').hidden = news;
     view.$('news-body').hidden = !news;

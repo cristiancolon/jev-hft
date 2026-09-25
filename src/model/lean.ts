@@ -123,6 +123,7 @@ export class LeanBook {
  */
 export function fillLeans(recs: DecisionRecord[], book = new LeanBook()): DecisionRecord[] {
   for (const rec of recs) {
+    if (!rec.probabilities) continue; // Jev was not asked (D63): there is no lean to read
     const read = book.take(rec.tResp, rec.probabilities);
     if (rec.lean) continue;
     rec.lean = read.lean;

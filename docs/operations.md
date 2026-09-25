@@ -54,6 +54,7 @@ program with a clear message.
 | Setting | Default | Meaning |
 |---|---|---|
 | `JEV_PROVIDER` | `typesafe` | `typesafe` (straight to TypeSafe, half the delay), `gateway`, or `mock` (free random answers) |
+| `JEV_MARKET` | `0` | `1` makes `npm run live` ask Jev about the market every second as well as recording the order-book model's calls (D63); the news program always asks Jev |
 | `AI_GATEWAY_MODEL` | `typesafe-ai/jev` | the model's name on the gateway, for `JEV_PROVIDER=gateway` |
 | `JEV_USD_PER_MTOK` | `0.042` | list price per million input tokens, used to work out what a call cost when the route doesn't say. The gateway reports its own figure and ignores this |
 | `MOCK_LATENCY_MS` | `375` | how long the mock takes to answer |
@@ -230,7 +231,7 @@ both.
 **Before spending real requests on a change:**
 
 1. `npm run check` (type check and tests).
-2. `JEV_PROVIDER=mock RUN_MINUTES=3 WARMUP_S=30 npm run live`, then `npm run analyze` on the
+2. `JEV_MARKET=1 JEV_PROVIDER=mock RUN_MINUTES=3 WARMUP_S=30 npm run live`, then `npm run analyze` on the
    output. The random answers must score about zero; anything else means the report is peeking
    at future prices.
 3. For news changes: `NEWS_MANUAL=1 NEWS_SOURCES=none JEV_PROVIDER=mock npm run news` and type a
