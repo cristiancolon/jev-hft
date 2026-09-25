@@ -19,6 +19,8 @@ The short answers, from four days of data the Raspberry Pi recorded:
 - **No trade at either horizon pays for itself at any fee Coinbase publishes.** The strongest
   calls catch about 0.4 bp a trade; the cheapest taker round trip costs 10 bp. Even perfect
   foresight could pay for a round trip in only 0.4% of 10-second windows at that fee.
+  Binance.US, where trades would now be placed, is cheaper, at about 4 bp a round trip, but
+  0.4 bp is still a tenth of that ([decisions.md](decisions.md#d62-trading-costs-are-binanceuss-where-the-trades-would-be-placed)).
 
 ## The data
 
@@ -112,8 +114,16 @@ The locked day looked the same: its strongest tenth caught +0.36 bp a trade, eno
 of 0.16 bp a fill. Even a perfect prediction does not survive: at 5 bp per fill, only 0.4% of 10-second windows,
 and 6.6% of 60-second ones, moved far enough to pay for a round trip.
 
+**Binance.US** (checked 2026-09-25) charges takers 2 bp per fill on BTC/USD and BTC/USDT (1 bp
+only above $500M a month), and makers nothing. Its spread is a median 0.01 bp on BTC/USD, and a
+$100 order fits within its best price nine times in ten, so a round trip there costs about 4 bp.
+That is a quarter of what 10 bp at Coinbase leaves out of reach, and more of the time the price
+moves that far: over 2026-09-21 to 24, 10.6% of 10-second windows and 43.4% of 60-second ones,
+against 0.7% and 9.6% for 10 bp. But the model's strongest calls, at 0.4 bp, are still a tenth
+of the cost.
+
 **So better accuracy at these horizons cannot be turned into profit by taking prices on
-Coinbase.** The accuracy is real and useful as a building block, but the money has to come from
+Coinbase, or on Binance.US.** The accuracy is real and useful as a building block, but the money has to come from
 paying less or knowing more (below).
 
 ## What the pipeline does with this
@@ -124,7 +134,7 @@ paying less or knowing more (below).
   It is worked out in about 10 µs, after Jev's request has already been sent, so it never
   slows Jev down, and it adds nothing to the handling of each market event.
 - **Every trade in the reports and on the dashboard pays for itself**: the fee on both fills
-  (`FEE_BPS_PER_SIDE`, 5 by default) and the spread (`src/model/costs.ts`). Each also keeps what
+  (`FEE_BPS_PER_SIDE`, 2 by default, Binance.US's taker fee; 5 when this study was done) and the spread (`src/model/costs.ts`). Each also keeps what
   the moves alone were worth, so a signal that is right but too small to trade can be told apart
   from one that is wrong.
 - **A new dashboard card trades the order-book model**, and looks at the cost first: it takes a

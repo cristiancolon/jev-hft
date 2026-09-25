@@ -70,11 +70,11 @@ total. Each is shown as typical (median), slow (90th percentile), and very slow 
 **2. The "perfect foresight" line:** for each horizon, the average size of the price move. No
 prediction can earn more per trade than this, so compare it with your trading cost before
 anything else. In our recorded data it was 0.05 to 0.1 bp at 1 second and 1 to 4 bp at 60
-seconds, while a round trip really costs somewhere around 10 bp. That's why this path can't be
+seconds, while a round trip really costs about 4 bp (Binance.US) to 10 bp (Coinbase's cheapest). That's why this path can't be
 profitable at these horizons, however good the predictions.
 
-A round trip is charged the exchange's fee twice (`FEE_BPS_PER_SIDE`, 5 bp by default,
-Coinbase's cheapest taker rate) plus the average spread of the decisions scored; the first line of
+A round trip is charged the exchange's fee twice (`FEE_BPS_PER_SIDE`, 2 bp by default,
+Binance.US's taker rate) plus the average spread of the decisions scored; the first line of
 the report says what that came to. Set `FEE_BPS_PER_SIDE=0` to see what the moves alone were
 worth.
 

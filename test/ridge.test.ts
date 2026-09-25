@@ -83,7 +83,7 @@ function feeWith(env: Record<string, string>): number {
 }
 
 test('the fee is set per fill; an old round-trip FEE_BPS still means the same cost', () => {
-  assert.equal(feeWith({}), 5, "Coinbase's lowest published taker fee by default");
+  assert.equal(feeWith({}), 2, "Binance.US's taker fee by default");
   assert.equal(feeWith({ FEE_BPS_PER_SIDE: '0' }), 0);
   assert.equal(feeWith({ FEE_BPS: '10' }), 5, 'a 10 bp round trip is 5 on each side');
   assert.equal(feeWith({ FEE_BPS: '10', FEE_BPS_PER_SIDE: '2' }), 2, 'the new setting wins');

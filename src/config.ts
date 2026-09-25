@@ -61,7 +61,7 @@ function sources(spec: string | undefined): string[] {
  */
 function feeBpsPerSide() {
   const legacy = process.env.FEE_BPS?.trim();
-  if (process.env.FEE_BPS_PER_SIDE?.trim() || !legacy) return envNum('FEE_BPS_PER_SIDE', 5, { min: 0 });
+  if (process.env.FEE_BPS_PER_SIDE?.trim() || !legacy) return envNum('FEE_BPS_PER_SIDE', 2, { min: 0 });
   return envNum('FEE_BPS', 0, { min: 0 }) / 2;
 }
 
@@ -115,10 +115,10 @@ export const config = {
   /**
    * What the exchange charges per fill, in bps, the way fee schedules quote it. A round trip pays
    * it twice, plus the spread, and that is charged to every trade in the reports and the
-   * dashboard's profit and loss (src/model/costs.ts). The default is Coinbase Advanced Trade's
-   * lowest published taker fee (0.05%, its biggest-volume tier), the least a taker pays there;
-   * its smallest tier charged 0.60% (60) when this was written. 0 shows what the moves alone
-   * were worth.
+   * dashboard's profit and loss (src/model/costs.ts). The default is Binance.US's taker fee on
+   * BTC/USD and BTC/USDT (0.02% since 2026-04-22, for any account trading under $500M a month), where trades would
+   * be placed (docs/decisions.md D62). Coinbase Advanced Trade's ran from 0.60% (60) at its
+   * smallest tier to 0.05% (5) at its largest. 0 shows what the moves alone were worth.
    */
   feeBpsPerSide: feeBpsPerSide(),
 

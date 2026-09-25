@@ -63,7 +63,7 @@ Everything the pipeline is doing, as it does it:
 
   Two things are worth keeping in mind when reading it. Trades overlap, so it assumes you could
   hold several at once. And every trade pays what trading really costs: the exchange's fee on
-  both fills (`FEE_BPS_PER_SIDE`, 5 bp by default) and the spread it would have crossed. "Before
+  both fills (`FEE_BPS_PER_SIDE`, 2 bp by default, Binance.US's taker fee) and the spread it would have crossed. "Before
   costs" shows what the moves alone were worth and "costs" what paying for them took. "Went your
   way" is measured before costs, so it says how often the call itself was right. Over short
   horizons the price is often exactly where it started, and those trades are counted separately
@@ -231,7 +231,7 @@ nothing at all while its tab is in the background.
 | `DASHBOARD_PORT` | `4000` | the page's port |
 | `TELEMETRY_PORT` | `4100` | the port the dashboard listens on for the pipeline's messages |
 | `DASHBOARD_HOST` | `127.0.0.1` | which network address to listen on. `0.0.0.0` makes the page reachable from other machines |
-| `FEE_BPS_PER_SIDE` | `5` | the exchange's fee on each fill, in bp; every trade in the profit and loss pays it twice, plus the spread |
+| `FEE_BPS_PER_SIDE` | `2` | the exchange's fee on each fill, in bp; every trade in the profit and loss pays it twice, plus the spread |
 | `PNL_NOTIONAL_USD` | `100` | the stake behind each trade, so the total can be shown in money |
 
 ## Watching a Raspberry Pi

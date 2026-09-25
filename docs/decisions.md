@@ -709,6 +709,8 @@ wrong one.
 simulated, they need their own cost model: a resting order is not always filled, and tends to be
 filled when the price is moving against it.
 
+The default has since become Binance.US's taker fee (D62).
+
 ## D56. Running out of credits pauses the engine for minutes
 
 **Chosen:** when TypeSafe says the account has no credits, the market-data engine waits a minute
@@ -845,3 +847,36 @@ judge. The slowest sources also deserve a look: Cointelegraph's items arrived ab
 after their stated publication time, and CoinDesk's about forty seconds, by which time much of a
 move may be gone ([news.md](news.md#sources)).
 
+## D62. Trading costs are Binance.US's, where the trades would be placed
+
+**Chosen:** `FEE_BPS_PER_SIDE` defaults to 2, Binance.US's taker fee on BTC/USD and BTC/USDT,
+in place of Coinbase's cheapest taker fee of 5.
+
+**Why:** trades would be placed on Binance.US, so its costs are the ones that matter. Coinbase's
+fee was the default only because Coinbase was the one exchange the pipeline knew when the fee was
+first charged (D55); recording Binance.US (D58) was about whether its prices move first, and the
+cost was never revisited.
+
+**The facts, checked 2026-09-25:** Binance.US charges 0% to makers and 0.02% to takers on every
+pair since 2026-04-22, dropping to 0.01% only above $500M of trading a month; only BNB/USD is
+cheaper
+([its fee page](https://www.binance.us/fees)). Its spread, over 20 hours of the Pi's recordings,
+was a median 0.01 bp on BTC/USD and 0.03 bp on BTC/USDT, under 0.2 bp nine times in ten. Its best
+ask held a median of about $215 on BTC/USD, and a $100 order cost a median 0.005 bp more than the
+mid (0.19 bp at the ninetieth percentile). So a taker's round trip is about 4 bp, almost all of it
+fees.
+
+**What is still Coinbase's:** the prices. Every move is measured on Coinbase's mid, and the spread
+charged is Coinbase's at the time, about 0.001 bp, against Binance.US's 0.01 to 0.2. Both
+differences are under a fifth of a basis point, small next to 4 bp of fees. Binance.US's price
+follows Coinbase's closely over minutes, less so over seconds, so the 10 s cards describe
+Binance.US least exactly.
+
+**What it changes:** the news card's bar drops from about 10 bp to about 4, so it trades more
+headlines. The market-data cards still take almost nothing: their best calls expect well under a
+basis point.
+
+**When to rethink:** if orders rest on the book instead (0% there), costs fall to the spread, but
+a resting order is not always filled and tends to fill when the price moves against it, which
+needs its own model. If the moves themselves are to be Binance.US's, the pipeline has to price
+from its recording too.

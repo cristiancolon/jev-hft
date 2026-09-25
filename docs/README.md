@@ -70,8 +70,9 @@ check later whether Jev's judgments were right, and whether they arrived fast en
   days the Pi recorded, with the last day kept locked until every choice was made, a small model
   of the order book was right 56% of the time at 10 seconds (67% on its strongest calls in calm
   markets), against 52% for Jev on the same seconds. At 60 seconds nothing beat a coin flip. And
-  no trade at either horizon pays for itself at any fee Coinbase publishes: the best calls catch
-  about 0.4 bp against a 10 bp round trip ([accuracy.md](accuracy.md)).
+  no trade at either horizon pays for itself: the best calls catch about 0.4 bp, against a
+  round trip of about 4 bp on Binance.US, where trades would be placed, and 10 bp at Coinbase's
+  cheapest ([accuracy.md](accuracy.md)).
 - **Cost is small:** about three thousandths of a cent per decision. The news path costs cents a
   day; asking about the market once a second costs about $3 a day.
 

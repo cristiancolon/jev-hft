@@ -147,7 +147,7 @@ search. A search that finds nothing costs nothing.
    project aims at horizons from seconds to minutes.
 4. **Trading costs matter more than speed at short horizons.** In our recorded data, Bitcoin's
    average price move was 0.05 to 0.1 bp over 1 second, 0.5 to 0.9 bp over 10 seconds, and 1 to
-   4 bp over 60 seconds. A round trip of buying and selling costs around 10 bp. No amount of
+   4 bp over 60 seconds. A round trip of buying and selling costs about 4 bp on Binance.US and 10 bp at Coinbase's cheapest. No amount of
    speed fixes that gap, which is why the news path exists: news can move prices by far more.
 5. **For news, being told beats asking.** Seconds are lost waiting for the next check, not
    waiting for Jev.

@@ -58,7 +58,7 @@ program with a clear message.
 | `JEV_USD_PER_MTOK` | `0.042` | list price per million input tokens, used to work out what a call cost when the route doesn't say. The gateway reports its own figure and ignores this |
 | `MOCK_LATENCY_MS` | `375` | how long the mock takes to answer |
 | `RUN_MINUTES` | `0` | stop after this many minutes (0 means run until stopped) |
-| `FEE_BPS_PER_SIDE` | `5` | the exchange's fee on each fill, in bp, as its fee schedule quotes it (0.60% is 60). Every trade in the reports and the dashboard's profit and loss pays it twice, plus the spread. 5 is Coinbase's lowest published taker fee; 0 shows what the moves alone were worth. The old `FEE_BPS` (a round-trip figure) still works, read as half on each side |
+| `FEE_BPS_PER_SIDE` | `2` | the exchange's fee on each fill, in bp, as its fee schedule quotes it (0.60% is 60). Every trade in the reports and the dashboard's profit and loss pays it twice, plus the spread. 5 is Coinbase's lowest published taker fee; 0 shows what the moves alone were worth. The old `FEE_BPS` (a round-trip figure) still works, read as half on each side |
 | `PNL_NOTIONAL_USD` | `100` | the stake behind each trade in the dashboard's profit and loss |
 
 **Dashboard** ([dashboard.md](dashboard.md))
@@ -129,10 +129,13 @@ program with a clear message.
   default accounts it's usually cents. Profiles are looked up once per account, ever (6 cents for
   the defaults), and remembered in `data/cache/x-users.json`.
 - **Coinbase, the public news feeds, and the SEC:** free.
-- **Trading itself (not done here, only charged in the reports):** Coinbase charged 60 bp per fill
-  for takers at its smallest tier and 5 bp at its largest when this was written, and a round trip
-  pays it twice. At the cheapest of those, nothing at 10 or 60 seconds survives, even with perfect
-  foresight almost every time ([accuracy.md](accuracy.md#what-trading-costs)).
+- **Trading itself (not done here, only charged in the reports):** trades would be placed on
+  Binance.US, which charges takers 2 bp per fill on BTC/USD and BTC/USDT (1 bp only above $500M
+  a month) and makers nothing; a round trip pays the fee twice, about 4 bp with its spread
+  ([decisions.md](decisions.md#d62-trading-costs-are-binanceuss-where-the-trades-would-be-placed)).
+  Coinbase charged takers 60 bp per fill at its smallest tier and 5 bp at its largest. The
+  models' calls at 10 and 60 seconds catch well under a basis point, so nothing there survives
+  either fee ([accuracy.md](accuracy.md#what-trading-costs)).
 
 ## Running on a Raspberry Pi
 
